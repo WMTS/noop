@@ -207,9 +207,17 @@ internal fun HrCapStatusLine(workoutStartMs: Long) {
     val g by com.noop.intervals.HrZoneGuard.state.collectAsStateWithLifecycle()
     if (!g.active || g.linkedWorkoutStartMs != workoutStartMs) return
     val color = if (g.alerting) Palette.statusCritical else Palette.statusPositive
+    val limit = when {
+        g.capBpm <= 0 -> null
+        g.isCustom -> "below ${g.capBpm} bpm"
+        else -> "Zone ${g.zone} or below (max ${g.capBpm} bpm)"
+    }
+    val avg = if (g.targetAvg > 0) {
+        " · avg ${if (g.avgBpm > 0) g.avgBpm.toString() else "—"} / target ${g.targetAvg}"
+    } else ""
     Text(
-        if (g.alerting) "Above Zone ${g.zone} (max ${g.capBpm} bpm). Ease off."
-        else "HR alert: Zone ${g.zone} or below (max ${g.capBpm} bpm)",
+        if (g.alerting) "Over ${g.capBpm} bpm. Ease off.$avg"
+        else (limit?.let { "HR alert: $it" } ?: "HR") + avg,
         style = NoopType.subhead,
         color = color,
         modifier = Modifier

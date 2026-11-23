@@ -73,6 +73,8 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
     var pickingProgram by remember { mutableStateOf(false) }
     // Fork: heart-rate ceiling alert, remembered between runs. 0 = off.
     var hrCapZone by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.zone(context)) }
+    var hrCustomBpm by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.customBpm(context)) }
+    var hrTargetAvg by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.targetAvg(context)) }
     var pickingHrCap by remember { mutableStateOf(false) }
     var gpsOn by remember(selected) { mutableStateOf(selected.isDistanceSport) }
     val filtered = WorkoutSport.all.filter { it.name.contains(query, ignoreCase = true) }
@@ -172,9 +174,9 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
                     Text("HR alert", style = NoopType.body, color = Palette.textPrimary)
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        hrCapLabel(context, hrCapZone),
+                        hrCapLabel(context, hrCapZone, hrTargetAvg),
                         style = NoopType.body,
-                        color = if (hrCapZone > 0) Palette.accent else Palette.textTertiary,
+                        color = if (hrCapZone > 0 || hrTargetAvg > 0) Palette.accent else Palette.textTertiary,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -207,27 +209,72 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
             onDismissRequest = { pickingHrCap = false },
             title = { Text("Heart rate alert") },
             text = {
-                Column {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        "Warns you (voice, beep, strap buzz) when your heart rate stays above the top of the zone for 15 seconds.",
+                        "Warns you (voice, beep, strap buzz) when your heart rate stays above the limit for 15 seconds.",
                         style = NoopType.footnote, color = Palette.textTertiary,
                     )
+                    // Fork: a set bpm ceiling (e.g. a coach's "stay under 150").
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            hrCapZone = com.noop.intervals.HrCapPrefs.CUSTOM
+                            com.noop.intervals.HrCapPrefs.setZone(context, hrCapZone)
+                        }.padding(vertical = 8.dp),
+                    ) {
+                        Text(
+                            "Stay below",
+                            style = NoopType.body,
+                            color = if (hrCapZone == com.noop.intervals.HrCapPrefs.CUSTOM) Palette.accent else Palette.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        androidx.compose.material3.TextButton(onClick = {
+                            hrCustomBpm = (hrCustomBpm - 5).coerceAtLeast(80)
+                            com.noop.intervals.HrCapPrefs.setCustomBpm(context, hrCustomBpm)
+                            hrCapZone = com.noop.intervals.HrCapPrefs.CUSTOM
+                            com.noop.intervals.HrCapPrefs.setZone(context, hrCapZone)
+                        }) { Text("−5") }
+                        Text("$hrCustomBpm bpm", style = NoopType.bodyNumber, color = Palette.textPrimary)
+                        androidx.compose.material3.TextButton(onClick = {
+                            hrCustomBpm = (hrCustomBpm + 5).coerceAtMost(220)
+                            com.noop.intervals.HrCapPrefs.setCustomBpm(context, hrCustomBpm)
+                            hrCapZone = com.noop.intervals.HrCapPrefs.CUSTOM
+                            com.noop.intervals.HrCapPrefs.setZone(context, hrCapZone)
+                        }) { Text("+5") }
+                    }
                     (0..4).forEach { z ->
                         Text(
-                            hrCapLabel(context, z),
+                            hrCapLabel(context, z, 0),
                             style = NoopType.body,
                             color = if (z == hrCapZone) Palette.accent else Palette.textPrimary,
                             modifier = Modifier.fillMaxWidth().clickable {
                                 hrCapZone = z
                                 com.noop.intervals.HrCapPrefs.setZone(context, z)
-                                pickingHrCap = false
-                            }.padding(vertical = 12.dp),
+                            }.padding(vertical = 10.dp),
                         )
+                    }
+                    // Fork: target average, read out every 10 minutes.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Target average", style = NoopType.body, color = Palette.textPrimary)
+                            Text("Read out every 10 minutes", style = NoopType.footnote, color = Palette.textTertiary)
+                        }
+                        androidx.compose.material3.TextButton(onClick = {
+                            hrTargetAvg = if (hrTargetAvg <= 80) 0 else hrTargetAvg - 5
+                            com.noop.intervals.HrCapPrefs.setTargetAvg(context, hrTargetAvg)
+                        }) { Text("−5") }
+                        Text(if (hrTargetAvg > 0) "$hrTargetAvg" else "Off", style = NoopType.bodyNumber, color = Palette.textPrimary)
+                        androidx.compose.material3.TextButton(onClick = {
+                            hrTargetAvg = if (hrTargetAvg == 0) 140 else (hrTargetAvg + 5).coerceAtMost(220)
+                            com.noop.intervals.HrCapPrefs.setTargetAvg(context, hrTargetAvg)
+                        }) { Text("+5") }
                     }
                 }
             },
-            confirmButton = {},
-            dismissButton = { OutlinedButton(onClick = { pickingHrCap = false }) { Text("Cancel") } },
+            confirmButton = { Button(onClick = { pickingHrCap = false }) { Text("Done") } },
         )
     }
     if (pickingProgram) {
@@ -238,11 +285,17 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
     }
 }
 
-/** Fork: "Off" or "Zone 2 or below (under 142 bpm)" from the user's own zone settings. */
-private fun hrCapLabel(context: android.content.Context, zone: Int): String {
-    if (zone == 0) return "Off"
+/** Fork: "Off", "Below 150 bpm" or "Zone 2 or below (max 142 bpm)", plus the target average if set. */
+private fun hrCapLabel(context: android.content.Context, zone: Int, targetAvg: Int): String {
     val cap = com.noop.intervals.HrCapPrefs.capBpm(context, zone)
-    return if (cap != null) "Zone $zone or below (max $cap bpm)" else "Zone $zone or below"
+    val limit = when {
+        zone == 0 -> null
+        zone == com.noop.intervals.HrCapPrefs.CUSTOM -> "Below $cap bpm"
+        cap != null -> "Zone $zone or below (max $cap bpm)"
+        else -> "Zone $zone or below"
+    }
+    val avg = if (targetAvg > 0) "avg $targetAvg" else null
+    return listOfNotNull(limit, avg).joinToString(", ").ifEmpty { "Off" }
 }
 
 /** Fork: wraps the program picker for the start sheet. */

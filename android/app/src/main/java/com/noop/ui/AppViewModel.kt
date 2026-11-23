@@ -1644,7 +1644,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // Fork: run an interval program alongside this workout; it records per-interval splits.
         intervalProgram?.let { com.noop.intervals.IntervalEngine.start(appContext, it, linkedWorkoutStartMs = startMs) }
         // Fork: heart-rate ceiling alert ("stay in Zone N or below").
-        if (hrCapZone in 1..4) com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
+        if (hrCapZone > 0 || com.noop.intervals.HrCapPrefs.targetAvg(appContext) > 0) {
+            com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
+        }
     }
 
     /** Fork: stop the heart-rate ceiling alert if it belongs to workout [w]. */
