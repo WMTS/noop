@@ -1,0 +1,312 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index 2d38c18..14c30d6 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -58,8 +58,9 @@ android {
+     buildTypes {
+         debug {
+             isMinifyEnabled = false
+-            applicationIdSuffix = ".debug"
+-            versionNameSuffix = "-debug"
++            // Rick fork: own app id so it never collides with upstream's debug/staging builds.
++            applicationIdSuffix = ".rick"
++            versionNameSuffix = "-intervals"
+         }
+         release {
+             // Shipped UNMINIFIED for reliability. R8 minification crashes this app at runtime: full-mode
+diff --git a/android/app/src/debug/res/values/strings.xml b/android/app/src/debug/res/values/strings.xml
+index 46b3390..29d8cd8 100644
+--- a/android/app/src/debug/res/values/strings.xml
++++ b/android/app/src/debug/res/values/strings.xml
+@@ -3,9 +3,9 @@
+   Fork-only (noop-staging): debug builds are the testing/staging app. The package is already
+   com.noop.whoop.debug (debug applicationIdSuffix), so it installs ALONGSIDE the official NOOP
+   (com.noop.whoop) with its own data. This override gives it a distinct launcher name so the two
+-  are tellable apart on the home screen. Build-type source set wins over main/flavor, so
++  are tellable apart on the home screen. (Rick fork: renamed "NOOP Intervals", id suffix .rick.) Build-type source set wins over main/flavor, so
+   assembleFullDebug shows "NOOP Staging". Mirrors how the demo flavor labels itself "NOOP Demo".
+ -->
+ <resources>
+-    <string name="app_name">NOOP Staging</string>
++    <string name="app_name">NOOP Intervals</string>
+ </resources>
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index c3f1222..0645497 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -68,6 +68,8 @@
+     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+     <!-- K14: haptic feedback (vibration) when a Coach reply arrives. -->
+     <uses-permission android:name="android.permission.VIBRATE" />
++    <!-- Fork addition: keeps the CPU awake while an interval session runs with the screen off. -->
++    <uses-permission android:name="android.permission.WAKE_LOCK" />
+ 
+     <!-- Smart alarm (#207). The guaranteed wake is an exact OS alarm scheduled via AlarmManager,
+          independent of Bluetooth and the app being alive. SCHEDULE_EXACT_ALARM (API 31-32) is
+diff --git a/android/app/src/main/java/com/noop/ui/AppViewModel.kt b/android/app/src/main/java/com/noop/ui/AppViewModel.kt
+index c76e2c8..44ba09c 100644
+--- a/android/app/src/main/java/com/noop/ui/AppViewModel.kt
++++ b/android/app/src/main/java/com/noop/ui/AppViewModel.kt
+@@ -1607,7 +1607,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+     }
+ 
+     /** Begin a workout for [sport]; start GPS route tracking when [gpsEnabled]. Single buzz confirms. */
+-    fun startWorkout(sport: Sport = WorkoutSport.default, gpsEnabled: Boolean = false) {
++    fun startWorkout(
++        sport: Sport = WorkoutSport.default,
++        gpsEnabled: Boolean = false,
++        intervalProgram: com.noop.intervals.IntervalProgram? = null,
++        hrCapZone: Int = 0,
++    ) {
+         if (_activeWorkout.value != null) return
+         _lastWorkout.value = null
+         val startMs = System.currentTimeMillis()
+@@ -1632,6 +1637,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+             // on relaunch (#529). GPS sessions are already covered by GpsSession's process durability.
+             persistNonGpsWorkout(_activeWorkout.value)
+         }
++        // Fork: hold the strap's live HR stream for the whole workout, not only while the live screen is
++        // open, so heart rate (and interval split HR) keeps recording if you back out of that screen.
++        // Uses the same ref-count as the screens, so it never cuts off a screen that still wants HR.
++        requestRealtimeHr()
++        // Fork: run an interval program alongside this workout; it records per-interval splits.
++        intervalProgram?.let { com.noop.intervals.IntervalEngine.start(appContext, it, linkedWorkoutStartMs = startMs) }
++        // Fork: heart-rate ceiling alert ("stay in Zone N or below").
++        if (hrCapZone in 1..4) com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
++    }
++
++    /** Fork: stop the heart-rate ceiling alert if it belongs to workout [w]. */
++    private fun stopHrGuardFor(w: ActiveWorkout) {
++        if (com.noop.intervals.HrZoneGuard.state.value.linkedWorkoutStartMs == w.startMs) {
++            com.noop.intervals.HrZoneGuard.stop()
++        }
++    }
++
++    /** Fork: true when the interval engine is attached to workout [w]. */
++    private fun intervalsLinkedTo(w: ActiveWorkout): Boolean {
++        val st = com.noop.intervals.IntervalEngine.state.value
++        return st.active && st.linkedWorkoutStartMs == w.startMs
+     }
+ 
+     /** Snapshot the in-flight NON-GPS workout to durable storage (#529). No-op for a GPS session (the
+@@ -1707,6 +1733,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+     fun toggleWorkoutPause() {
+         val w = _activeWorkout.value ?: return
+         val now = System.currentTimeMillis()
++        if (intervalsLinkedTo(w)) {
++            if (w.pausedAtMs == null) com.noop.intervals.IntervalEngine.pause() else com.noop.intervals.IntervalEngine.resume()
++        }
++        if (com.noop.intervals.HrZoneGuard.state.value.linkedWorkoutStartMs == w.startMs) {
++            com.noop.intervals.HrZoneGuard.setPaused(w.pausedAtMs == null)
++        }
+         val updated = if (w.pausedAtMs == null) {
+             if (w.gpsEnabled) GpsSession.pause()
+             w.copy(pausedAtMs = now)
+@@ -1721,6 +1753,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+     /** Abort the active workout and discard all in-flight data. */
+     fun discardWorkout() {
+         val w = _activeWorkout.value ?: return
++        if (intervalsLinkedTo(w)) com.noop.intervals.IntervalEngine.stop(saveSplits = false)
++        stopHrGuardFor(w)
++        releaseRealtimeHr()
+         _activeWorkout.value = null
+         gpsJob?.cancel(); gpsJob = null
+         activeWorkoutStore.clear()
+@@ -1736,6 +1771,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+      *  discarded quietly. Double-buzz confirms the save. */
+     fun endWorkout() {
+         val w = _activeWorkout.value ?: return
++        // Fork: stop the attached interval timer BEFORE the GPS session stops, so the step in progress
++        // gets its final distance. Splits are keyed by the same start second the WorkoutRow uses.
++        if (intervalsLinkedTo(w)) {
++            com.noop.intervals.IntervalEngine.stop(saveSplits = true, workoutStartTs = w.startMs / 1000)
++        }
++        stopHrGuardFor(w)
++        releaseRealtimeHr()
+         _activeWorkout.value = null
+         gpsJob?.cancel(); gpsJob = null
+         // Drop the durable non-GPS snapshot the instant the session ends — whether it saves below or is
+diff --git a/android/app/src/main/java/com/noop/ui/LiveWorkoutScreen.kt b/android/app/src/main/java/com/noop/ui/LiveWorkoutScreen.kt
+index a504647..12bcfdf 100644
+--- a/android/app/src/main/java/com/noop/ui/LiveWorkoutScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/LiveWorkoutScreen.kt
+@@ -173,6 +173,10 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
+                 )
+             }
+ 
++            // Fork: interval timer attached to this workout (or a button to add one mid-run).
++            IntervalRunPanel(workoutStartMs = w.startMs, workoutPaused = w.pausedAtMs != null)
++            HrCapStatusLine(workoutStartMs = w.startMs)
++
+             // Centered live-HR hero — tinted to the current zone; the zone label sits on the zone rail below.
+             HeroHeartRate(bpm = bpm, zone = zone)
+ 
+diff --git a/android/app/src/main/java/com/noop/ui/WorkoutStart.kt b/android/app/src/main/java/com/noop/ui/WorkoutStart.kt
+index a30b470..c262661 100644
+--- a/android/app/src/main/java/com/noop/ui/WorkoutStart.kt
++++ b/android/app/src/main/java/com/noop/ui/WorkoutStart.kt
+@@ -55,10 +55,25 @@ import kotlinx.coroutines.delay
+  * the workout has started (or the user cancels).
+  */
+ @Composable
+-fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
++fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId: String? = null) {
+     val context = LocalContext.current
+     var query by remember { mutableStateOf("") }
+-    var selected by remember { mutableStateOf<Sport>(WorkoutSport.default) }
++    // Fork: coming from the Intervals screen's "Run with GPS", preselect Running.
++    var selected by remember {
++        mutableStateOf<Sport>(
++            if (initialProgramId != null) WorkoutSport.all.firstOrNull { it.name.equals("Running", ignoreCase = true) }
++                ?: WorkoutSport.default
++            else WorkoutSport.default,
++        )
++    }
++    // Fork: optional interval program to run alongside the recording (records per-interval splits).
++    var intervalProgram by remember {
++        mutableStateOf(com.noop.intervals.IntervalProgramStore.find(context, initialProgramId))
++    }
++    var pickingProgram by remember { mutableStateOf(false) }
++    // Fork: heart-rate ceiling alert, remembered between runs. 0 = off.
++    var hrCapZone by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.zone(context)) }
++    var pickingHrCap by remember { mutableStateOf(false) }
+     var gpsOn by remember(selected) { mutableStateOf(selected.isDistanceSport) }
+     val filtered = WorkoutSport.all.filter { it.name.contains(query, ignoreCase = true) }
+     // #297: the user's last selections, one tap away above the full catalogue. Only catalogue-resolvable
+@@ -77,7 +92,7 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+     // Workouts) that use this sheet get the live workout without each screen wiring it.
+     var showLiveWorkout by remember { mutableStateOf(false) }
+     val startWithGps = rememberRequestLocation { granted ->
+-        vm.startWorkout(selected, gpsEnabled = gpsOn && granted)
++        vm.startWorkout(selected, gpsEnabled = gpsOn && granted, intervalProgram = intervalProgram, hrCapZone = hrCapZone)
+         showLiveWorkout = true
+     }
+ 
+@@ -129,6 +144,43 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+                     Spacer(Modifier.weight(1f))
+                     Switch(checked = gpsOn, onCheckedChange = { gpsOn = it })
+                 }
++                // Fork: attach an interval program to this workout.
++                Row(
++                    verticalAlignment = Alignment.CenterVertically,
++                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
++                ) {
++                    Text("Intervals", style = NoopType.body, color = Palette.textPrimary)
++                    Spacer(Modifier.width(12.dp))
++                    Text(
++                        intervalProgram?.name ?: "None",
++                        style = NoopType.body,
++                        color = if (intervalProgram != null) Palette.accent else Palette.textTertiary,
++                        maxLines = 1,
++                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
++                        modifier = Modifier.weight(1f),
++                    )
++                    if (intervalProgram != null) {
++                        androidx.compose.material3.TextButton(onClick = { intervalProgram = null }) { Text("Clear") }
++                    }
++                    androidx.compose.material3.TextButton(onClick = { pickingProgram = true }) { Text("Choose") }
++                }
++                // Fork: "stay in Zone N or below" heart-rate alert.
++                Row(
++                    verticalAlignment = Alignment.CenterVertically,
++                    modifier = Modifier.fillMaxWidth(),
++                ) {
++                    Text("HR alert", style = NoopType.body, color = Palette.textPrimary)
++                    Spacer(Modifier.width(12.dp))
++                    Text(
++                        hrCapLabel(context, hrCapZone),
++                        style = NoopType.body,
++                        color = if (hrCapZone > 0) Palette.accent else Palette.textTertiary,
++                        maxLines = 1,
++                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
++                        modifier = Modifier.weight(1f),
++                    )
++                    androidx.compose.material3.TextButton(onClick = { pickingHrCap = true }) { Text("Choose") }
++                }
+             }
+         },
+         confirmButton = {
+@@ -139,7 +191,7 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+                 if (gpsOn) {
+                     startWithGps() // requests location, then starts + opens live workout in the callback (#101)
+                 } else {
+-                    vm.startWorkout(selected, gpsEnabled = false)
++                    vm.startWorkout(selected, gpsEnabled = false, intervalProgram = intervalProgram, hrCapZone = hrCapZone)
+                     showLiveWorkout = true
+                 }
+             }) {
+@@ -150,6 +202,53 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+             OutlinedButton(onClick = onDismiss) { Text(uiString(R.string.l10n_workout_start_cancel_77dfd213)) }
+         },
+     )
++    if (pickingHrCap) {
++        AlertDialog(
++            onDismissRequest = { pickingHrCap = false },
++            title = { Text("Heart rate alert") },
++            text = {
++                Column {
++                    Text(
++                        "Warns you (voice, beep, strap buzz) when your heart rate stays above the top of the zone for 15 seconds.",
++                        style = NoopType.footnote, color = Palette.textTertiary,
++                    )
++                    (0..4).forEach { z ->
++                        Text(
++                            hrCapLabel(context, z),
++                            style = NoopType.body,
++                            color = if (z == hrCapZone) Palette.accent else Palette.textPrimary,
++                            modifier = Modifier.fillMaxWidth().clickable {
++                                hrCapZone = z
++                                com.noop.intervals.HrCapPrefs.setZone(context, z)
++                                pickingHrCap = false
++                            }.padding(vertical = 12.dp),
++                        )
++                    }
++                }
++            },
++            confirmButton = {},
++            dismissButton = { OutlinedButton(onClick = { pickingHrCap = false }) { Text("Cancel") } },
++        )
++    }
++    if (pickingProgram) {
++        StartSheetProgramPicker(
++            onDismiss = { pickingProgram = false },
++            onPick = { p -> intervalProgram = p; pickingProgram = false },
++        )
++    }
++}
++
++/** Fork: "Off" or "Zone 2 or below (under 142 bpm)" from the user's own zone settings. */
++private fun hrCapLabel(context: android.content.Context, zone: Int): String {
++    if (zone == 0) return "Off"
++    val cap = com.noop.intervals.HrCapPrefs.capBpm(context, zone)
++    return if (cap != null) "Zone $zone or below (max $cap bpm)" else "Zone $zone or below"
++}
++
++/** Fork: wraps the program picker for the start sheet. */
++@Composable
++private fun StartSheetProgramPicker(onDismiss: () -> Unit, onPick: (com.noop.intervals.IntervalProgram) -> Unit) {
++    IntervalProgramPickerDialog(title = "Intervals for this workout", onDismiss = onDismiss, onPick = onPick)
+ }
+ 
+ /** One tappable sport row — shared by the #297 Recent block and the full catalogue list. */
+diff --git a/android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt b/android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt
+index c26e72c..97dc9a0 100644
+--- a/android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt
+@@ -1661,6 +1661,16 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
+                 HeartRateRecoveryCard(it)
+             }
+ 
++            // Fork: per-interval splits, when this workout was recorded with an interval program.
++            val splitsCtx = LocalContext.current
++            val hasIntervalSplits = remember(row.startTs) {
++                com.noop.intervals.IntervalSplitStore.load(splitsCtx, row.startTs) != null
++            }
++            if (hasIntervalSplits) {
++                CardDivider()
++                IntervalSplitsSection(row.startTs)
++            }
++
+             // Export the recorded GPS route as a GPX/FIT file (Strava / Garmin Connect / any GPS app).
+             // Only when a route with a drawable path was recorded; the file is built on-device and shared.
+             row.routePolyline?.let { poly ->

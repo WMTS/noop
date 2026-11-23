@@ -1,597 +1,391 @@
 package com.noop.ui
 
 import com.noop.R
-import androidx.compose.ui.res.stringResource
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.delay
-import java.util.Locale
-import kotlin.math.max
-import kotlin.math.min
+import com.noop.intervals.CueSettingsStore
+import com.noop.intervals.IntervalEngine
+import com.noop.intervals.IntervalProgram
+import com.noop.intervals.IntervalProgramStore
+import com.noop.intervals.StepKind
 
-// MARK: - IntervalsScreen (ported from Strand/Screens/IntervalTimerView.swift)
+// MARK: - IntervalsScreen
 //
-// Silent haptic HIIT interval timer. Train hands-free: the strap buzzes every
-// transition so you never have to look at the screen. Strong triple-buzz at the
-// start of each WORK block, a short single buzz into REST, a 3-2-1 tick on the last
-// seconds of every phase, and a long 5-loop buzz when the whole session finishes.
-// With no strap bonded it still works as a big glanceable visual timer (no haptics).
+// Fork version (Rick). The upstream screen was a silent haptic HIIT timer with work / rest / rounds.
+// This one is a Tabata-app style timer: warm-up, custom step blocks, rounds, sets, rest between sets,
+// cool-down, saved programs, and voice + beep + vibration cues so it works with no strap. The timer
+// runs in the process-level IntervalEngine, so it keeps going with the screen off. "Run with GPS"
+// starts a recorded run with the selected program attached, which records per-interval splits.
 
-private enum class IntervalPhase(val label: String) {
-    Work("WORK"),
-    Rest("REST"),
-    Done("DONE"),
-}
-
-/**
- * Silent haptic HIIT interval timer: configurable work/rest/rounds, a big glanceable
- * countdown ring, phase + round read-out, Start/Pause/Reset, a session overview, and
- * a strap buzz on every transition (triple into WORK, single into REST, a 3-2-1 tick,
- * a long 5-loop buzz on completion). Buzz cues are skipped entirely when no strap is
- * bonded, so it degrades cleanly to a pure visual timer.
- */
 @Composable
 fun IntervalsScreen(vm: AppViewModel) {
+    val context = LocalContext.current
     val live by vm.live.collectAsStateWithLifecycle()
+    val st by IntervalEngine.state.collectAsStateWithLifecycle()
+    val activeWorkout by vm.activeWorkout.collectAsStateWithLifecycle()
 
-    // Config (persisted only in-view), mirroring the macOS defaults.
-    var workSeconds by remember { mutableIntStateOf(30) }
-    var restSeconds by remember { mutableIntStateOf(15) }
-    var rounds by remember { mutableIntStateOf(8) }
-
-    // Run state.
-    var phase by remember { mutableStateOf(IntervalPhase.Work) }
-    var currentRound by remember { mutableIntStateOf(1) }
-    var remaining by remember { mutableIntStateOf(30) }   // seconds left in the current phase
-    var running by remember { mutableStateOf(false) }
-    var elapsed by remember { mutableIntStateOf(0) }      // total elapsed seconds across the session
-
-    val isFinished = phase == IntervalPhase.Done
-
-    // Buzz only when bonded — keep it a pure visual tool otherwise.
-    fun buzz(loops: Int) {
-        if (live.bonded) vm.buzz(loops, HapticPrefs.INTERVALS)
+    // Bumped after saves / deletes so the program list re-reads storage.
+    var revision by remember { mutableStateOf(0) }
+    val programs = remember(revision) { IntervalProgramStore.all(context) }
+    var selectedId by remember {
+        mutableStateOf(IntervalProgramStore.lastUsedId(context) ?: IntervalProgram.presets.first().id)
     }
+    val selected = programs.firstOrNull { it.id == selectedId } ?: programs.first()
 
-    fun resetToStart() {
-        phase = IntervalPhase.Work
-        currentRound = 1
-        remaining = max(1, workSeconds)
-        elapsed = 0
-    }
+    var editing by remember { mutableStateOf<IntervalProgram?>(null) }
+    var confirmDelete by remember { mutableStateOf<IntervalProgram?>(null) }
+    var showRunSheet by remember { mutableStateOf(false) }
+    var cues by remember { mutableStateOf(CueSettingsStore.load(context)) }
 
-    // Editing config while paused snaps the run state back to a clean start, matching
-    // the macOS onChange handlers. While running, config is locked (steppers disabled).
-    LaunchedEffect(workSeconds, restSeconds, rounds) {
-        if (currentRound > rounds) currentRound = rounds
-        if (!running) resetToStart()
-    }
+    val running = st.active && !st.finished
+    val linkedToRun = st.active && st.linkedWorkoutStartMs != null
 
-    // 1 Hz engine — runs only while `running`. Drives the countdown, the 3-2-1 tick,
-    // and phase/round advancement with the appropriate buzz cue at each transition.
-    LaunchedEffect(running) {
-        if (!running) return@LaunchedEffect
-        while (true) {
-            delay(1000)
-            if (isFinished) return@LaunchedEffect
-
-            // 3-2-1 tick on the last seconds of the current phase.
-            if (remaining in 1..3) buzz(loops = 1)
-
-            if (remaining > 1) {
-                remaining -= 1
-                elapsed += 1
-                continue
-            }
-
-            // remaining hits 0 — advance phase/round.
-            elapsed += 1
-            when (phase) {
-                IntervalPhase.Work -> {
-                    if (currentRound >= rounds) {
-                        // Last work block finished → session complete.
-                        phase = IntervalPhase.Done
-                        remaining = 0
-                        running = false
-                        buzz(loops = 5)            // long completion cue
-                        return@LaunchedEffect
-                    } else {
-                        phase = IntervalPhase.Rest
-                        remaining = max(1, restSeconds)
-                        buzz(loops = 1)            // short cue into rest
-                    }
-                }
-                IntervalPhase.Rest -> {
-                    currentRound += 1
-                    phase = IntervalPhase.Work
-                    remaining = max(1, workSeconds)
-                    buzz(loops = 3)                // strong cue into work
-                }
-                IntervalPhase.Done -> return@LaunchedEffect
-            }
-        }
-    }
-
-    DisposableEffect(Unit) { onDispose { running = false } }
-
-    // Derived geometry.
-    val phaseDuration = when (phase) {
-        IntervalPhase.Work -> max(1, workSeconds)
-        IntervalPhase.Rest -> max(1, restSeconds)
-        IntervalPhase.Done -> 1
-    }
-    val intervalProgress = ((phaseDuration - remaining).toDouble() / phaseDuration.toDouble())
-        .coerceIn(0.0, 1.0)
-    val totalPlanned =
-        if (rounds > 0) workSeconds * rounds + restSeconds * max(0, rounds - 1) else 0
-    val sessionProgress =
-        if (totalPlanned > 0) (elapsed.toDouble() / totalPlanned.toDouble()).coerceIn(0.0, 1.0) else 0.0
-    // The active phase's colour world: WORK → Effort (amber), REST → Rest (periwinkle), DONE → green.
-    val phaseColor = when (phase) {
-        IntervalPhase.Work -> Palette.effortColor
-        IntervalPhase.Rest -> Palette.restColor
-        IntervalPhase.Done -> Palette.statusPositive
-    }
-    // Deep→bright ramp for the active phase, fed to the hero progress BevelGauge's arc.
-    val phaseStops = when (phase) {
-        IntervalPhase.Work -> Palette.effortGradientStops
-        IntervalPhase.Rest -> Palette.restGradientStops
-        IntervalPhase.Done -> listOf(
-            0f to Palette.statusPositive.copy(alpha = 0.6f),
-            1f to Palette.statusPositive,
-        )
-    }
-    val atCleanStart = !running && remaining == phaseDuration &&
-        currentRound == 1 && phase == IntervalPhase.Work && elapsed == 0
-
-    fun toggleRunning() {
-        if (isFinished) return
-        if (running) {
-            running = false
-        } else {
-            val startingFresh = phase == IntervalPhase.Work && currentRound == 1 &&
-                remaining == max(1, workSeconds) && elapsed == 0
-            running = true
-            if (startingFresh) buzz(loops = 3)     // opening WORK cue
-        }
-    }
-
-    // PERF (#707): lazy scaffold — each of the four cards is one `item { }`. The running timer ticks
-    // `remaining` once a second at body scope; in a LazyColumn that tick only recomposes the VISIBLE items
-    // (the heavy per-second BevelGauge hero) and off-screen cards (config) don't recompose or get
-    // semantics-walked. Order/spacing unchanged (LazyColumn reproduces the eager `spacedBy(20.dp)`).
     LazyScreenScaffold(
         title = uiString(R.string.l10n_intervals_screen_interval_timer_1d703deb),
-        subtitle = "Silent haptic HIIT - the strap buzzes the transitions",
+        subtitle = "Voice, beep and strap cues. Keeps running with the screen off.",
     ) {
         // --- Status row ---
         item {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (live.bonded) {
-                StatePill("Buzz cues on", tone = StrandTone.Positive)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (live.bonded && cues.strapBuzz) StatePill("Strap buzz on", tone = StrandTone.Positive)
+                else if (cues.voice) StatePill("Voice cues on", tone = StrandTone.Positive)
+                else StatePill("Cues off", tone = StrandTone.Warning)
+                Spacer(Modifier.weight(1f))
+                when {
+                    st.paused -> StatePill("Paused", tone = StrandTone.Neutral, showsDot = false)
+                    running -> StatePill(if (linkedToRun) "Running with GPS" else "Running", tone = StrandTone.Accent, pulsing = true)
+                    st.finished -> StatePill("Complete", tone = StrandTone.Positive)
+                    else -> StatePill("Ready", tone = StrandTone.Neutral, showsDot = false)
+                }
+            }
+        }
+
+        // --- Hero: live timer, or the selected program ready to go ---
+        item {
+            if (st.active) {
+                TimerHero(st, linkedToRun)
             } else {
-                StatePill("Connect strap for buzz cues", tone = StrandTone.Warning)
+                ReadyHero(
+                    program = selected,
+                    canRunWithGps = activeWorkout == null,
+                    onStart = { IntervalEngine.start(context, selected) },
+                    onRunWithGps = {
+                        IntervalProgramStore.setLastUsed(context, selected.id)
+                        showRunSheet = true
+                    },
+                )
             }
-            Spacer(Modifier.weight(1f))
-            when {
-                running -> StatePill("Running", tone = StrandTone.Accent, pulsing = true)
-                isFinished -> StatePill("Complete", tone = StrandTone.Positive)
-                else -> StatePill("Paused", tone = StrandTone.Neutral, showsDot = false)
-            }
-        }
         }
 
-        // --- Stage hero: the immersive timer face over a scenic Effort backdrop ---
+        // --- Programs ---
         item {
-        // The running timer is the hero — a layered-ring BevelGauge of the phase progress, glowing
-        // in the active phase's world (WORK → effort amber, REST → rest periwinkle), on a frosted
-        // Effort-tinted card over a starfield. The countdown is the gauge's centred numeral.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(Metrics.cardRadius)),
-        ) {
-            ScenicHeroBackground(modifier = Modifier.matchParentSize(), domain = DomainTheme.Effort)
-            NoopCard(padding = 24.dp, tint = phaseColor) {
-                Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    // Phase chip + round chip line — both frosted.
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        PhaseChip(label = phase.label, color = phaseColor)
+            NoopCard {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Overline("Programs")
                         Spacer(Modifier.weight(1f))
-                        RoundChip(currentRound = min(currentRound, rounds), rounds = rounds)
+                        TextButton(
+                            onClick = {
+                                editing = IntervalProgram(
+                                    id = IntervalProgramStore.newId(), name = "My intervals",
+                                )
+                            },
+                            enabled = !st.active,
+                        ) { Text("New", color = Palette.accent) }
                     }
-
-                    // The hero progress gauge with the countdown at its centre.
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        BevelGauge(
-                            fraction = if (isFinished) 1.0 else intervalProgress,
-                            stops = phaseStops,
-                            tipColor = phaseColor,
-                            numberText = if (isFinished) "✓" else remaining.toString(),
-                            captionText = if (isFinished) "SESSION DONE" else "SECONDS",
-                            diameter = 240.dp,
-                            lineWidth = 18.dp,
+                    programs.forEachIndexed { i, p ->
+                        ProgramRow(
+                            program = p,
+                            selected = p.id == selected.id,
+                            enabled = !st.active,
+                            onSelect = { selectedId = p.id },
+                            onEdit = {
+                                // Presets are read-only: editing one saves an editable copy.
+                                editing = if (p.builtIn) p.copy(id = IntervalProgramStore.newId(), name = p.name + " (copy)", builtIn = false) else p
+                            },
+                            onDelete = if (p.builtIn) null else ({ confirmDelete = p }),
                         )
-                    }
-
-                    // Controls.
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Button(
-                            onClick = {
-                                if (isFinished) resetToStart()
-                                toggleRunning()
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Palette.accent,
-                                contentColor = Palette.surfaceBase,
-                            ),
-                        ) {
-                            Icon(
-                                if (running) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.padding(end = 6.dp),
-                            )
-                            Text(
-                                if (running) "Pause" else if (isFinished) "Restart" else "Start",
-                                style = NoopType.headline,
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                running = false
-                                resetToStart()
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = !atCleanStart,
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Palette.textSecondary,
-                            ),
-                        ) {
-                            Icon(
-                                Icons.Filled.Refresh,
-                                contentDescription = null,
-                                modifier = Modifier.padding(end = 6.dp),
-                            )
-                            Text(uiString(R.string.l10n_intervals_screen_reset_44c57abd), style = NoopType.headline)
-                        }
-                    }
-
-                    if (!live.bonded) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Filled.Vibration,
-                                contentDescription = null,
-                                tint = Palette.textTertiary,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                uiString(R.string.l10n_intervals_screen_bond_your_strap_on_the_live_d799cbc2),
-                                style = NoopType.footnote,
-                                color = Palette.textTertiary,
-                                textAlign = TextAlign.Center,
-                            )
-                        }
+                        if (i < programs.size - 1) IvDivider()
                     }
                 }
             }
         }
-        }
 
-        // --- Overview card: elapsed / planned ---
+        // --- Cue settings ---
         item {
-        NoopCard {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    Overline("Session")
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        uiString(R.string.l10n_intervals_screen_timestring_elapsed_timestring_totalplanned_7b68f8d7, timeString(elapsed), timeString(totalPlanned)),
-                        style = NoopType.bodyNumber,
-                        color = Palette.textPrimary,
-                    )
-                }
-
-                // Slim total-session progress bar — filled with the Effort world gradient.
-                val animatedSession by animateFloatAsState(
-                    targetValue = sessionProgress.toFloat(),
-                    animationSpec = tween(900, easing = Motion.easeOut),
-                    label = "session",
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Palette.surfaceInset),
-                ) {
-                    if (animatedSession > 0f) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(animatedSession)
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(
-                                    Brush.horizontalGradient(*Palette.effortGradientStops.toTypedArray()),
-                                ),
-                        )
+            NoopCard {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Overline("Cues")
+                    fun update(c: com.noop.intervals.CueSettings) {
+                        cues = c
+                        CueSettingsStore.save(context, c)
                     }
-                }
-
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    OverviewStat(Modifier.weight(1f), "Work", "${workSeconds}s", Palette.effortColor)
-                    OverviewStat(Modifier.weight(1f), "Rest", "${restSeconds}s", Palette.restColor)
-                    OverviewStat(Modifier.weight(1f), "Rounds", rounds.toString(), Palette.textPrimary)
-                    OverviewStat(
-                        Modifier.weight(1f), "Remaining",
-                        timeString(max(0, totalPlanned - elapsed)), Palette.textSecondary,
-                    )
+                    IvSwitchRow("Voice", "Announces each step, round and your last interval's pace.", cues.voice) { update(cues.copy(voice = it)) }
+                    IvSwitchRow("Beeps", "A tone at every step change.", cues.beeps) { update(cues.copy(beeps = it)) }
+                    IvSwitchRow("3-2-1 countdown", "Ticks on the last three seconds of each step.", cues.countdown) { update(cues.copy(countdown = it)) }
+                    IvSwitchRow("Strap buzz", "Triple buzz into work, single into rest (WHOOP strap).", cues.strapBuzz) { update(cues.copy(strapBuzz = it)) }
+                    IvSwitchRow("Phone vibration", null, cues.phoneVibrate) { update(cues.copy(phoneVibrate = it)) }
+                    IvSwitchRow("Halfway call", "Says \"halfway\" on steps a minute or longer.", cues.halfwayCall) { update(cues.copy(halfwayCall = it)) }
+                    if (st.active) {
+                        Text("Changes apply to the next session.", style = NoopType.footnote, color = Palette.textTertiary)
+                    }
                 }
             }
         }
-        }
+    }
 
-        // --- Config card ---
-        item {
-        NoopCard {
+    editing?.let { p ->
+        IntervalProgramEditorDialog(
+            initial = p,
+            onDismiss = { editing = null },
+            onSave = { saved ->
+                IntervalProgramStore.upsert(context, saved)
+                selectedId = saved.id
+                editing = null
+                revision++
+            },
+        )
+    }
+
+    confirmDelete?.let { p ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Delete \"${p.name}\"?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    IntervalProgramStore.delete(context, p.id)
+                    if (selectedId == p.id) selectedId = IntervalProgram.presets.first().id
+                    confirmDelete = null
+                    revision++
+                }) { Text("Delete", color = Palette.statusCritical) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
+        )
+    }
+
+    if (showRunSheet) {
+        StartWorkoutSheet(vm = vm, onDismiss = { showRunSheet = false }, initialProgramId = selected.id)
+    }
+}
+
+@Composable
+private fun ReadyHero(
+    program: IntervalProgram,
+    canRunWithGps: Boolean,
+    onStart: () -> Unit,
+    onRunWithGps: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Metrics.cardRadius))) {
+        ScenicHeroBackground(modifier = Modifier.matchParentSize(), domain = DomainTheme.Effort)
+        NoopCard(padding = 24.dp, tint = Palette.effortColor) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Overline("Configure")
-                ConfigStepper(
-                    title = uiString(R.string.l10n_intervals_screen_work_00040bab), unit = "sec", value = workSeconds,
-                    range = 5..600, step = 5, tint = Palette.effortColor, enabled = !running,
-                    onChange = { workSeconds = it },
-                )
-                Divider()
-                ConfigStepper(
-                    title = uiString(R.string.l10n_intervals_screen_rest_b79e5f48), unit = "sec", value = restSeconds,
-                    range = 5..600, step = 5, tint = Palette.restColor, enabled = !running,
-                    onChange = { restSeconds = it },
-                )
-                Divider()
-                ConfigStepper(
-                    title = uiString(R.string.l10n_intervals_screen_rounds_ceeac4ac), unit = null, value = rounds,
-                    range = 1..30, step = 1, tint = Palette.textPrimary, enabled = !running,
-                    onChange = { rounds = it },
-                )
-                if (running) {
+                Text(program.name, style = NoopType.title2, color = Palette.textPrimary)
+                Text(ivSummary(program), style = NoopType.subhead, color = Palette.textSecondary)
+                Text(ivClock(program.totalSeconds()), style = NoopType.number(48f), color = Palette.textPrimary)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = onStart,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
+                        Text("Timer only", style = NoopType.headline)
+                    }
+                    Button(
+                        onClick = onRunWithGps,
+                        enabled = canRunWithGps,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Palette.effortColor, contentColor = Palette.surfaceBase),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.DirectionsRun, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
+                        Text("Run with GPS", style = NoopType.headline)
+                    }
+                }
+                if (!canRunWithGps) {
                     Text(
-                        uiString(R.string.l10n_intervals_screen_pause_to_change_work_rest_or_f54f9cc5),
-                        style = NoopType.footnote,
-                        color = Palette.textTertiary,
+                        "A workout is already recording. Open it to add intervals.",
+                        style = NoopType.footnote, color = Palette.textTertiary,
                     )
                 }
             }
-        }
         }
     }
 }
 
-// MARK: - Phase + round chips (frosted pills, mirror IntervalTimerView.phaseChip / .roundChip)
-
-/** Frosted phase pill (WORK / REST / DONE) tinted to the active world. */
 @Composable
-private fun PhaseChip(label: String, color: Color) {
+private fun TimerHero(st: IntervalEngine.State, linkedToRun: Boolean) {
+    val cur = st.current
+    val color = if (st.finished) Palette.statusPositive else ivColor(cur?.kind)
+    val stops = when {
+        st.finished -> listOf(0f to Palette.statusPositive.copy(alpha = 0.6f), 1f to Palette.statusPositive)
+        cur?.kind == StepKind.WORK -> Palette.effortGradientStops
+        cur?.kind == StepKind.REST || cur?.kind == StepKind.SET_REST -> Palette.restGradientStops
+        else -> listOf(0f to Palette.statusPositive.copy(alpha = 0.6f), 1f to Palette.statusPositive)
+    }
+    val fraction = if (st.finished || cur == null) 1.0
+    else ((cur.seconds - st.remainingS).toDouble() / cur.seconds.coerceAtLeast(1)).coerceIn(0.0, 1.0)
+
+    Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Metrics.cardRadius))) {
+        ScenicHeroBackground(modifier = Modifier.matchParentSize(), domain = DomainTheme.Effort)
+        NoopCard(padding = 24.dp, tint = color) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    IvChip(if (st.finished) "DONE" else (cur?.name ?: "").uppercase(), color)
+                    Spacer(Modifier.weight(1f))
+                    if (cur != null && cur.round > 0 && cur.rounds > 1) {
+                        Text(
+                            "Round ${cur.round}/${cur.rounds}" + if (cur.sets > 1) "  Set ${cur.set}/${cur.sets}" else "",
+                            style = NoopType.number(16f), color = Palette.textSecondary,
+                        )
+                    }
+                }
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    BevelGauge(
+                        fraction = fraction,
+                        stops = stops,
+                        tipColor = color,
+                        numberText = if (st.finished) "✓" else ivClock(st.remainingS),
+                        captionText = if (st.finished) "SESSION DONE" else st.next?.let { "NEXT ${it.name.uppercase()}" } ?: "LAST STEP",
+                        diameter = 240.dp,
+                        lineWidth = 18.dp,
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text("${ivClock(st.elapsedS)} / ${ivClock(st.totalS)}", style = NoopType.bodyNumber, color = Palette.textPrimary)
+                    Spacer(Modifier.weight(1f))
+                    Text("${ivClock(st.totalS - st.elapsedS)} left", style = NoopType.bodyNumber, color = Palette.textSecondary)
+                }
+                IvProgressBar(if (st.totalS > 0) st.elapsedS.toFloat() / st.totalS else 0f, Palette.effortColor)
+
+                if (linkedToRun) {
+                    Text(
+                        "Attached to your recording run. Pause and End it from the workout screen.",
+                        style = NoopType.footnote, color = Palette.textTertiary,
+                    )
+                } else if (st.finished) {
+                    Button(
+                        onClick = { IntervalEngine.dismissFinished() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                    ) { Text("Done", style = NoopType.headline) }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = { IntervalEngine.togglePause() },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = Palette.surfaceBase),
+                        ) {
+                            Icon(if (st.paused) Icons.Filled.PlayArrow else Icons.Filled.Pause, contentDescription = null, modifier = Modifier.padding(end = 4.dp))
+                            Text(if (st.paused) "Resume" else "Pause", style = NoopType.headline)
+                        }
+                        OutlinedButton(onClick = { IntervalEngine.skip() }, enabled = !st.paused, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Filled.SkipNext, contentDescription = null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Skip", style = NoopType.headline)
+                        }
+                        OutlinedButton(
+                            onClick = { IntervalEngine.stop(saveSplits = false) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.statusCritical),
+                        ) {
+                            Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Stop", style = NoopType.headline)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProgramRow(
+    program: IntervalProgram,
+    selected: Boolean,
+    enabled: Boolean,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: (() -> Unit)?,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onSelect)
+            .padding(vertical = 6.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                program.name, style = NoopType.body,
+                color = if (selected) Palette.accent else Palette.textPrimary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${ivClock(program.totalSeconds())} · ${ivSummary(program)}",
+                style = NoopType.footnote, color = Palette.textTertiary,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        TextButton(onClick = onEdit, enabled = enabled) {
+            Text(if (program.builtIn) "Copy" else "Edit", color = Palette.accent)
+        }
+        if (onDelete != null) {
+            TextButton(onClick = onDelete, enabled = enabled) { Text("Delete", color = Palette.statusCritical) }
+        }
+    }
+}
+
+@Composable
+private fun IvChip(label: String, color: Color) {
     val shape = RoundedCornerShape(50)
     Text(
         label,
-        style = NoopType.number(15f, weight = androidx.compose.ui.text.font.FontWeight.Bold)
-            .copy(letterSpacing = 2.sp),
+        style = NoopType.number(15f, weight = FontWeight.Bold).copy(letterSpacing = 2.sp),
         color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .clip(shape)
             .background(color.copy(alpha = 0.16f))
             .border(1.dp, color.copy(alpha = 0.35f), shape)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     )
-}
-
-/** Frosted round chip — "ROUND n / N". */
-@Composable
-private fun RoundChip(currentRound: Int, rounds: Int) {
-    val shape = RoundedCornerShape(50)
-    Row(
-        verticalAlignment = Alignment.Bottom,
-        modifier = Modifier
-            .clip(shape)
-            .background(Palette.surfaceInset)
-            .border(1.dp, Palette.hairline, shape)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-    ) {
-        Overline("Round")
-        Spacer(Modifier.width(6.dp))
-        Text(currentRound.toString(), style = NoopType.number(18f), color = Palette.textPrimary)
-        Spacer(Modifier.width(2.dp))
-        Text(uiString(R.string.l10n_intervals_screen_rounds_1c13358c, rounds), style = NoopType.number(18f), color = Palette.textTertiary)
-    }
-}
-
-// MARK: - Overview stat cell (mirrors IntervalTimerView.overviewStat)
-
-@Composable
-private fun OverviewStat(
-    modifier: Modifier,
-    label: String,
-    value: String,
-    color: Color,
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(label.uppercase(), style = NoopType.footnote, color = Palette.textTertiary)
-        Text(value, style = NoopType.number(18f), color = color, maxLines = 1)
-    }
-}
-
-// MARK: - Config stepper (mirrors IntervalTimerView.configStepper)
-//
-// A titled row with the current value and -/+ steppers, clamped to `range`. Disabled
-// (dimmed, non-interactive) while a session is running.
-
-@Composable
-private fun ConfigStepper(
-    title: String,
-    unit: String?,
-    value: Int,
-    range: IntRange,
-    step: Int,
-    tint: Color,
-    enabled: Boolean,
-    onChange: (Int) -> Unit,
-) {
-    val dim = if (enabled) 1f else Palette.disabledOpacity
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = NoopType.headline, color = Palette.textPrimary.copy(alpha = dim))
-            Text(
-                uiString(
-                    R.string.intervals_range_step,
-                    range.first,
-                    range.last,
-                    unit?.let { " $it" } ?: "",
-                    step,
-                ),
-                style = NoopType.footnote,
-                color = Palette.textTertiary.copy(alpha = dim),
-            )
-        }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                value.toString(),
-                style = NoopType.number(24f),
-                color = tint.copy(alpha = dim),
-                textAlign = TextAlign.End,
-                modifier = Modifier.width(44.dp),
-            )
-            if (unit != null) {
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    unit,
-                    style = NoopType.caption,
-                    color = Palette.textTertiary.copy(alpha = dim),
-                )
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        StepperButton(
-            icon = Icons.Filled.Remove,
-            description = "Decrease $title",
-            enabled = enabled && value > range.first,
-            tint = tint,
-        ) { onChange((value - step).coerceIn(range.first, range.last)) }
-        Spacer(Modifier.width(8.dp))
-        StepperButton(
-            icon = Icons.Filled.Add,
-            description = "Increase $title",
-            enabled = enabled && value < range.last,
-            tint = tint,
-        ) { onChange((value + step).coerceIn(range.first, range.last)) }
-    }
-}
-
-@Composable
-private fun StepperButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    description: String,
-    enabled: Boolean,
-    tint: Color,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(10.dp)
-    val content = if (enabled) tint else Palette.textTertiary.copy(alpha = Palette.disabledOpacity)
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        shape = shape,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = content,
-            disabledContentColor = Palette.textTertiary.copy(alpha = Palette.disabledOpacity),
-        ),
-        modifier = Modifier
-            .size(40.dp)
-            .semantics { contentDescription = description },
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-    }
-}
-
-// MARK: - Divider hairline
-
-@Composable
-private fun Divider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(Palette.hairline),
-    )
-}
-
-// MARK: - Formatting
-
-private fun timeString(seconds: Int): String {
-    val s = max(0, seconds)
-    return String.format(Locale.US, "%d:%02d", s / 60, s % 60)
 }
