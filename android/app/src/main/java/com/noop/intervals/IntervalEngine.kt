@@ -75,6 +75,7 @@ object IntervalEngine {
 
     // Per-step split accumulators.
     private var stepStartDistanceM = 0.0
+    private var stepStartWallMs = 0L
     private var hrSum = 0L
     private var hrCount = 0
     private var hrMax = 0
@@ -256,6 +257,7 @@ object IntervalEngine {
 
     private fun resetStepAccumulators() {
         stepStartDistanceM = GpsSession.state.value.distanceM
+        stepStartWallMs = System.currentTimeMillis()
         hrSum = 0L
         hrCount = 0
         hrMax = 0
@@ -278,6 +280,8 @@ object IntervalEngine {
             distanceM = dist,
             avgHr = if (hrCount > 0) (hrSum / hrCount).toInt() else null,
             maxHr = hrMax.takeIf { it > 0 },
+            startMs = stepStartWallMs,
+            endMs = System.currentTimeMillis(),
         )
     }
 

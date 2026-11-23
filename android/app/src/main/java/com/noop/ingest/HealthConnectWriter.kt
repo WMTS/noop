@@ -5,7 +5,11 @@ import kotlinx.coroutines.sync.withLock
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.ExerciseLap
+import androidx.health.connect.client.records.ExerciseSegment
+import androidx.health.connect.client.units.Energy
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
@@ -436,20 +440,35 @@ object HealthConnectWriter {
     val EXERCISE_PERMISSIONS: Set<String> = setOf(
         HealthPermission.getWritePermission(ExerciseSessionRecord::class),
         HealthPermission.getWritePermission(DistanceRecord::class),
+        // Fork (Rick): active calories for each workout.
+        HealthPermission.getWritePermission(ActiveCaloriesBurnedRecord::class),
     )
 
     /** Pure: build the records for one workout (testable without a client). */
-    fun buildExerciseRecords(row: WorkoutRow, exerciseType: Int): List<Record> {
+    fun buildExerciseRecords(
+        row: WorkoutRow,
+        exerciseType: Int,
+        splits: List<com.noop.intervals.IntervalSplit> = emptyList(),
+    ): List<Record> {
         val start = Instant.ofEpochSecond(row.startTs)
         val end = Instant.ofEpochSecond(row.endTs)
         val offset = ZoneId.systemDefault().rules.getOffset(start)
         val out = ArrayList<Record>()
+        fun session(segments: List<ExerciseSegment>, laps: List<ExerciseLap>) = ExerciseSessionRecord(
+            startTime = start, startZoneOffset = offset, endTime = end, endZoneOffset = offset,
+            exerciseType = exerciseType, title = row.sport,
+            metadata = Metadata(clientRecordId = "noop-workout-${row.startTs}", clientRecordVersion = row.endTs),
+            segments = segments, laps = laps,
+        )
+        // Fork (Rick): interval steps become segments (run / walk) and laps (with distance), so a coach
+        // sees each rep. Health Connect validates segment types against the session type and throws on
+        // a mismatch; fall back to laps only, then to the plain session, so a workout always writes.
+        val laps = intervalLaps(splits, start, end)
+        val segments = intervalSegments(splits, start, end, exerciseType)
         out.add(
-            ExerciseSessionRecord(
-                startTime = start, startZoneOffset = offset, endTime = end, endZoneOffset = offset,
-                exerciseType = exerciseType, title = row.sport,
-                metadata = Metadata(clientRecordId = "noop-workout-${row.startTs}", clientRecordVersion = row.endTs),
-            ),
+            runCatching { session(segments, laps) }
+                .recoverCatching { session(emptyList(), laps) }
+                .getOrElse { session(emptyList(), emptyList()) },
         )
         row.distanceM?.let {
             out.add(
@@ -463,13 +482,101 @@ object HealthConnectWriter {
         return out
     }
 
+    /** Fork (Rick): clamp interval split spans into the session window, in order, without overlaps. */
+    private fun splitSpans(
+        splits: List<com.noop.intervals.IntervalSplit>,
+        start: Instant,
+        end: Instant,
+    ): List<Triple<Instant, Instant, com.noop.intervals.IntervalSplit>> {
+        val out = ArrayList<Triple<Instant, Instant, com.noop.intervals.IntervalSplit>>()
+        var cursor = start
+        for (sp in splits.sortedBy { it.startMs ?: Long.MAX_VALUE }) {
+            val s0 = sp.startMs ?: continue
+            val s1 = sp.endMs ?: continue
+            var a = Instant.ofEpochMilli(s0)
+            var b = Instant.ofEpochMilli(s1)
+            if (a.isBefore(cursor)) a = cursor
+            if (b.isAfter(end)) b = end
+            if (!a.isBefore(b)) continue
+            out.add(Triple(a, b, sp))
+            cursor = b
+        }
+        return out
+    }
+
+    private fun intervalLaps(
+        splits: List<com.noop.intervals.IntervalSplit>,
+        start: Instant,
+        end: Instant,
+    ): List<ExerciseLap> = splitSpans(splits, start, end).map { (a, b, sp) ->
+        ExerciseLap(
+            startTime = a, endTime = b,
+            length = sp.distanceM?.takeIf { it in 0.0..1_000_000.0 }?.let { Length.meters(it) },
+        )
+    }
+
+    private fun intervalSegments(
+        splits: List<com.noop.intervals.IntervalSplit>,
+        start: Instant,
+        end: Instant,
+        exerciseType: Int,
+    ): List<ExerciseSegment> {
+        val treadmill = exerciseType == ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL
+        // A treadmill session only accepts treadmill-running segments, so there the walk breaks are
+        // left as gaps (the laps still cover them).
+        val spans = splitSpans(splits, start, end)
+            .filter { !treadmill || it.third.kind == com.noop.intervals.StepKind.WORK }
+        return spans.map { (a, b, sp) ->
+            val type = when (sp.kind) {
+                com.noop.intervals.StepKind.WORK ->
+                    if (treadmill) ExerciseSegment.EXERCISE_SEGMENT_TYPE_RUNNING_TREADMILL
+                    else ExerciseSegment.EXERCISE_SEGMENT_TYPE_RUNNING
+                com.noop.intervals.StepKind.SET_REST -> ExerciseSegment.EXERCISE_SEGMENT_TYPE_REST
+                else -> ExerciseSegment.EXERCISE_SEGMENT_TYPE_WALKING
+            }
+            ExerciseSegment(startTime = a, endTime = b, segmentType = type)
+        }
+    }
+
+    /** Fork (Rick): the workout's active calories as its own record (written separately, so a declined
+     *  calories permission never blocks the session itself). */
+    fun buildActiveCaloriesRecord(row: WorkoutRow, activeKcal: Double): Record? {
+        if (activeKcal <= 0 || activeKcal > 20_000) return null
+        val start = Instant.ofEpochSecond(row.startTs)
+        val end = Instant.ofEpochSecond(row.endTs)
+        if (!start.isBefore(end)) return null
+        val offset = ZoneId.systemDefault().rules.getOffset(start)
+        return ActiveCaloriesBurnedRecord(
+            startTime = start, startZoneOffset = offset, endTime = end, endZoneOffset = offset,
+            energy = Energy.kilocalories(activeKcal),
+            metadata = Metadata(clientRecordId = "noop-workout-kcal-${row.startTs}", clientRecordVersion = row.endTs),
+        )
+    }
+
     /** Insert one workout's records into Health Connect. Opt-in caller. Returns a [WritebackResult] so a
      *  failed exercise share is visible instead of silently swallowed, and records the outcome (#660). */
     suspend fun writeExercise(context: Context, row: WorkoutRow, exerciseType: Int): WritebackResult {
         if (HealthConnectClient.getSdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) return WritebackResult.UNAVAILABLE
-        val recs = buildExerciseRecords(row, exerciseType)
-        val result = runCatching { HealthConnectClient.getOrCreate(context).insertRecords(recs); recs.size }
+        // Fork (Rick): attach interval splits (segments + laps) and write active calories.
+        val splits = com.noop.intervals.IntervalSplitStore.load(context, row.startTs)?.splits.orEmpty()
+        val recs = buildExerciseRecords(row, exerciseType, splits)
+        val client = HealthConnectClient.getOrCreate(context)
+        val result = runCatching { client.insertRecords(recs); recs.size }
+            // If Health Connect rejects the segments/laps, write the plain workout rather than nothing.
+            .recoverCatching {
+                if (splits.isEmpty()) throw it
+                val plain = buildExerciseRecords(row, exerciseType)
+                client.insertRecords(plain); plain.size
+            }
             .fold({ WritebackResult(it, emptyList()) }, { WritebackResult(0, listOf(it.writebackCategory())) })
+        runCatching {
+            val weight = com.noop.ui.ProfileStore.from(context).weightKg
+            val durationS = row.durationS ?: (row.endTs - row.startTs).toDouble()
+            val active = com.noop.intervals.RunCalories.estimate(row.sport, row.distanceM, durationS, weight, splits)
+                ?.activeKcal
+                ?: row.energyKcal?.let { com.noop.intervals.RunCalories.activeFromGross(it, durationS, weight) }
+            active?.let { buildActiveCaloriesRecord(row, it) }?.let { client.insertRecords(listOf(it)) }
+        }
         recordStatus(context, result)
         return result
     }
@@ -488,6 +595,10 @@ object HealthConnectWriter {
         runCatching {
             client.deleteRecords(DistanceRecord::class,
                 recordIdsList = emptyList(), clientRecordIdsList = listOf("noop-workout-dist-$startTs"))
+        }
+        runCatching {
+            client.deleteRecords(ActiveCaloriesBurnedRecord::class,
+                recordIdsList = emptyList(), clientRecordIdsList = listOf("noop-workout-kcal-$startTs"))
         }
     }
 }

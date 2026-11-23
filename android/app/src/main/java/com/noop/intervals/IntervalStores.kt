@@ -96,6 +96,10 @@ data class IntervalSplit(
     val distanceM: Double?,
     val avgHr: Int?,
     val maxHr: Int?,
+    /** Wall-clock span of the step (ms). Null on splits saved by the first build. Used for Health
+     *  Connect segments / laps. */
+    val startMs: Long? = null,
+    val endMs: Long? = null,
 ) {
     /** Seconds per km, or null when there was no usable distance. */
     val paceSecPerKm: Double?
@@ -107,6 +111,8 @@ data class IntervalSplit(
         distanceM?.let { put("m", it) }
         avgHr?.let { put("hr", it) }
         maxHr?.let { put("mx", it) }
+        startMs?.let { put("t0", it) }
+        endMs?.let { put("t1", it) }
     }
 
     companion object {
@@ -121,6 +127,8 @@ data class IntervalSplit(
                 distanceM = if (o.has("m")) o.getDouble("m") else null,
                 avgHr = if (o.has("hr")) o.getInt("hr") else null,
                 maxHr = if (o.has("mx")) o.getInt("mx") else null,
+                startMs = if (o.has("t0")) o.getLong("t0") else null,
+                endMs = if (o.has("t1")) o.getLong("t1") else null,
             )
         }.getOrNull()
     }

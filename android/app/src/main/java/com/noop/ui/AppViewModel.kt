@@ -1850,10 +1850,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Calories.estimateBoutCalories(samples, currentProfile(), profileStore.hrMax.toDouble(), restingHR)
                 .first.takeIf { it > 0 }
         else null
+        // Fork (Rick): for runs and walks with a distance, cost energy from distance + time (ACSM), per
+        // interval step when there are splits, instead of heart rate alone. Falls back to the HR estimate.
+        val footKcal = com.noop.intervals.RunCalories.estimate(
+            sport = w.sport.name,
+            distanceM = distanceM.takeIf { it > 0 },
+            durationS = activeDurationMs / 1000.0,
+            weightKg = profileStore.weightKg,
+            splits = com.noop.intervals.IntervalSplitStore.load(appContext, w.startMs / 1000)?.splits.orEmpty(),
+        )?.grossKcal
         val row = WorkoutRow(
             deviceId = deviceId, startTs = w.startMs / 1000, endTs = endMs / 1000,
             sport = w.sport.name, source = "manual", durationS = activeDurationMs / 1000.0,
-            energyKcal = energyKcal,
+            energyKcal = footKcal ?: energyKcal,
             avgHr = avg, maxHr = peak, strain = strain,
             distanceM = distanceM.takeIf { it > 0 },
             routePolyline = if (track.size >= 2) RouteMath.encode(track) else null,
