@@ -1661,6 +1661,16 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
                 HeartRateRecoveryCard(it)
             }
 
+            // Fork: per-interval splits, when this workout was recorded with an interval program.
+            val splitsCtx = LocalContext.current
+            val hasIntervalSplits = remember(row.startTs) {
+                com.noop.intervals.IntervalSplitStore.load(splitsCtx, row.startTs) != null
+            }
+            if (hasIntervalSplits) {
+                CardDivider()
+                IntervalSplitsSection(row.startTs)
+            }
+
             // Export the recorded GPS route as a GPX/FIT file (Strava / Garmin Connect / any GPS app).
             // Only when a route with a drawable path was recorded; the file is built on-device and shared.
             row.routePolyline?.let { poly ->

@@ -173,6 +173,10 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
                 )
             }
 
+            // Fork: interval timer attached to this workout (or a button to add one mid-run).
+            IntervalRunPanel(workoutStartMs = w.startMs, workoutPaused = w.pausedAtMs != null)
+            HrCapStatusLine(workoutStartMs = w.startMs)
+
             // Centered live-HR hero — tinted to the current zone; the zone label sits on the zone rail below.
             HeroHeartRate(bpm = bpm, zone = zone)
 

@@ -68,6 +68,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- K14: haptic feedback (vibration) when a Coach reply arrives. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Fork addition: keeps the CPU awake while an interval session runs with the screen off. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Smart alarm (#207). The guaranteed wake is an exact OS alarm scheduled via AlarmManager,
          independent of Bluetooth and the app being alive. SCHEDULE_EXACT_ALARM (API 31-32) is

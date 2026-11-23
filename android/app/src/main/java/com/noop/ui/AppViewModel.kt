@@ -1607,7 +1607,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Begin a workout for [sport]; start GPS route tracking when [gpsEnabled]. Single buzz confirms. */
-    fun startWorkout(sport: Sport = WorkoutSport.default, gpsEnabled: Boolean = false) {
+    fun startWorkout(
+        sport: Sport = WorkoutSport.default,
+        gpsEnabled: Boolean = false,
+        intervalProgram: com.noop.intervals.IntervalProgram? = null,
+        hrCapZone: Int = 0,
+    ) {
         if (_activeWorkout.value != null) return
         _lastWorkout.value = null
         val startMs = System.currentTimeMillis()
@@ -1632,6 +1637,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // on relaunch (#529). GPS sessions are already covered by GpsSession's process durability.
             persistNonGpsWorkout(_activeWorkout.value)
         }
+        // Fork: hold the strap's live HR stream for the whole workout, not only while the live screen is
+        // open, so heart rate (and interval split HR) keeps recording if you back out of that screen.
+        // Uses the same ref-count as the screens, so it never cuts off a screen that still wants HR.
+        requestRealtimeHr()
+        // Fork: run an interval program alongside this workout; it records per-interval splits.
+        intervalProgram?.let { com.noop.intervals.IntervalEngine.start(appContext, it, linkedWorkoutStartMs = startMs) }
+        // Fork: heart-rate ceiling alert ("stay in Zone N or below").
+        if (hrCapZone in 1..4) com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
+    }
+
+    /** Fork: stop the heart-rate ceiling alert if it belongs to workout [w]. */
+    private fun stopHrGuardFor(w: ActiveWorkout) {
+        if (com.noop.intervals.HrZoneGuard.state.value.linkedWorkoutStartMs == w.startMs) {
+            com.noop.intervals.HrZoneGuard.stop()
+        }
+    }
+
+    /** Fork: true when the interval engine is attached to workout [w]. */
+    private fun intervalsLinkedTo(w: ActiveWorkout): Boolean {
+        val st = com.noop.intervals.IntervalEngine.state.value
+        return st.active && st.linkedWorkoutStartMs == w.startMs
     }
 
     /** Snapshot the in-flight NON-GPS workout to durable storage (#529). No-op for a GPS session (the
@@ -1707,6 +1733,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleWorkoutPause() {
         val w = _activeWorkout.value ?: return
         val now = System.currentTimeMillis()
+        if (intervalsLinkedTo(w)) {
+            if (w.pausedAtMs == null) com.noop.intervals.IntervalEngine.pause() else com.noop.intervals.IntervalEngine.resume()
+        }
+        if (com.noop.intervals.HrZoneGuard.state.value.linkedWorkoutStartMs == w.startMs) {
+            com.noop.intervals.HrZoneGuard.setPaused(w.pausedAtMs == null)
+        }
         val updated = if (w.pausedAtMs == null) {
             if (w.gpsEnabled) GpsSession.pause()
             w.copy(pausedAtMs = now)
@@ -1721,6 +1753,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Abort the active workout and discard all in-flight data. */
     fun discardWorkout() {
         val w = _activeWorkout.value ?: return
+        if (intervalsLinkedTo(w)) com.noop.intervals.IntervalEngine.stop(saveSplits = false)
+        stopHrGuardFor(w)
+        releaseRealtimeHr()
         _activeWorkout.value = null
         gpsJob?.cancel(); gpsJob = null
         activeWorkoutStore.clear()
@@ -1736,6 +1771,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  discarded quietly. Double-buzz confirms the save. */
     fun endWorkout() {
         val w = _activeWorkout.value ?: return
+        // Fork: stop the attached interval timer BEFORE the GPS session stops, so the step in progress
+        // gets its final distance. Splits are keyed by the same start second the WorkoutRow uses.
+        if (intervalsLinkedTo(w)) {
+            com.noop.intervals.IntervalEngine.stop(saveSplits = true, workoutStartTs = w.startMs / 1000)
+        }
+        stopHrGuardFor(w)
+        releaseRealtimeHr()
         _activeWorkout.value = null
         gpsJob?.cancel(); gpsJob = null
         // Drop the durable non-GPS snapshot the instant the session ends — whether it saves below or is

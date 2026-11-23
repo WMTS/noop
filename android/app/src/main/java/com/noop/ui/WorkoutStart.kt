@@ -55,10 +55,25 @@ import kotlinx.coroutines.delay
  * the workout has started (or the user cancels).
  */
 @Composable
-fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId: String? = null) {
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<Sport>(WorkoutSport.default) }
+    // Fork: coming from the Intervals screen's "Run with GPS", preselect Running.
+    var selected by remember {
+        mutableStateOf<Sport>(
+            if (initialProgramId != null) WorkoutSport.all.firstOrNull { it.name.equals("Running", ignoreCase = true) }
+                ?: WorkoutSport.default
+            else WorkoutSport.default,
+        )
+    }
+    // Fork: optional interval program to run alongside the recording (records per-interval splits).
+    var intervalProgram by remember {
+        mutableStateOf(com.noop.intervals.IntervalProgramStore.find(context, initialProgramId))
+    }
+    var pickingProgram by remember { mutableStateOf(false) }
+    // Fork: heart-rate ceiling alert, remembered between runs. 0 = off.
+    var hrCapZone by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.zone(context)) }
+    var pickingHrCap by remember { mutableStateOf(false) }
     var gpsOn by remember(selected) { mutableStateOf(selected.isDistanceSport) }
     val filtered = WorkoutSport.all.filter { it.name.contains(query, ignoreCase = true) }
     // #297: the user's last selections, one tap away above the full catalogue. Only catalogue-resolvable
@@ -77,7 +92,7 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     // Workouts) that use this sheet get the live workout without each screen wiring it.
     var showLiveWorkout by remember { mutableStateOf(false) }
     val startWithGps = rememberRequestLocation { granted ->
-        vm.startWorkout(selected, gpsEnabled = gpsOn && granted)
+        vm.startWorkout(selected, gpsEnabled = gpsOn && granted, intervalProgram = intervalProgram, hrCapZone = hrCapZone)
         showLiveWorkout = true
     }
 
@@ -129,6 +144,43 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                     Spacer(Modifier.weight(1f))
                     Switch(checked = gpsOn, onCheckedChange = { gpsOn = it })
                 }
+                // Fork: attach an interval program to this workout.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                ) {
+                    Text("Intervals", style = NoopType.body, color = Palette.textPrimary)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        intervalProgram?.name ?: "None",
+                        style = NoopType.body,
+                        color = if (intervalProgram != null) Palette.accent else Palette.textTertiary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (intervalProgram != null) {
+                        androidx.compose.material3.TextButton(onClick = { intervalProgram = null }) { Text("Clear") }
+                    }
+                    androidx.compose.material3.TextButton(onClick = { pickingProgram = true }) { Text("Choose") }
+                }
+                // Fork: "stay in Zone N or below" heart-rate alert.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("HR alert", style = NoopType.body, color = Palette.textPrimary)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        hrCapLabel(context, hrCapZone),
+                        style = NoopType.body,
+                        color = if (hrCapZone > 0) Palette.accent else Palette.textTertiary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    androidx.compose.material3.TextButton(onClick = { pickingHrCap = true }) { Text("Choose") }
+                }
             }
         },
         confirmButton = {
@@ -139,7 +191,7 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                 if (gpsOn) {
                     startWithGps() // requests location, then starts + opens live workout in the callback (#101)
                 } else {
-                    vm.startWorkout(selected, gpsEnabled = false)
+                    vm.startWorkout(selected, gpsEnabled = false, intervalProgram = intervalProgram, hrCapZone = hrCapZone)
                     showLiveWorkout = true
                 }
             }) {
@@ -150,6 +202,53 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit) {
             OutlinedButton(onClick = onDismiss) { Text(uiString(R.string.l10n_workout_start_cancel_77dfd213)) }
         },
     )
+    if (pickingHrCap) {
+        AlertDialog(
+            onDismissRequest = { pickingHrCap = false },
+            title = { Text("Heart rate alert") },
+            text = {
+                Column {
+                    Text(
+                        "Warns you (voice, beep, strap buzz) when your heart rate stays above the top of the zone for 15 seconds.",
+                        style = NoopType.footnote, color = Palette.textTertiary,
+                    )
+                    (0..4).forEach { z ->
+                        Text(
+                            hrCapLabel(context, z),
+                            style = NoopType.body,
+                            color = if (z == hrCapZone) Palette.accent else Palette.textPrimary,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                hrCapZone = z
+                                com.noop.intervals.HrCapPrefs.setZone(context, z)
+                                pickingHrCap = false
+                            }.padding(vertical = 12.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { OutlinedButton(onClick = { pickingHrCap = false }) { Text("Cancel") } },
+        )
+    }
+    if (pickingProgram) {
+        StartSheetProgramPicker(
+            onDismiss = { pickingProgram = false },
+            onPick = { p -> intervalProgram = p; pickingProgram = false },
+        )
+    }
+}
+
+/** Fork: "Off" or "Zone 2 or below (under 142 bpm)" from the user's own zone settings. */
+private fun hrCapLabel(context: android.content.Context, zone: Int): String {
+    if (zone == 0) return "Off"
+    val cap = com.noop.intervals.HrCapPrefs.capBpm(context, zone)
+    return if (cap != null) "Zone $zone or below (max $cap bpm)" else "Zone $zone or below"
+}
+
+/** Fork: wraps the program picker for the start sheet. */
+@Composable
+private fun StartSheetProgramPicker(onDismiss: () -> Unit, onPick: (com.noop.intervals.IntervalProgram) -> Unit) {
+    IntervalProgramPickerDialog(title = "Intervals for this workout", onDismiss = onDismiss, onPick = onPick)
 }
 
 /** One tappable sport row — shared by the #297 Recent block and the full catalogue list. */

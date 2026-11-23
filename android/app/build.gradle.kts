@@ -58,8 +58,9 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            // Rick fork: own app id so it never collides with upstream's debug/staging builds.
+            applicationIdSuffix = ".rick"
+            versionNameSuffix = "-intervals"
         }
         release {
             // Shipped UNMINIFIED for reliability. R8 minification crashes this app at runtime: full-mode
