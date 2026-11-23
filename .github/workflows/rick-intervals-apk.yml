@@ -1,0 +1,76 @@
+# Rick fork: build the "NOOP Intervals" debug APK and publish it to a rolling release, so the
+# newest build can be downloaded straight to the phone from the repo's Releases page.
+# Runs on every push to the intervals branch, or by hand from the Actions tab.
+name: NOOP Intervals APK
+
+on:
+  push:
+    branches: [rick-intervals]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rick-intervals-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v5
+      # Edits to existing upstream files arrive as patches in fork-patches/ (the push tool can only
+      # send whole files, and some upstream files are very large). Apply them, commit, and push back.
+      - name: Apply pending patches
+        working-directory: .
+        shell: bash
+        run: |
+          shopt -s nullglob
+          patches=(fork-patches/*.patch)
+          if [ ${#patches[@]} -eq 0 ]; then echo "No pending patches"; exit 0; fi
+          for p in "${patches[@]}"; do
+            echo "Applying $p"
+            git apply --whitespace=nowarn "$p" || patch -p1 -l --fuzz=3 --no-backup-if-mismatch < "$p"
+            git rm -q "$p"
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Apply fork patches: ${patches[*]}"
+          git push origin HEAD:${GITHUB_REF_NAME}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Build debug APK + interval tests
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew assembleFullDebug testFullDebugUnitTest --tests 'com.noop.intervals.*' --continue 2>&1 | tee build.log
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/full/debug/*.apk NOOP-Intervals.apk
+          gh release delete intervals-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create intervals-latest NOOP-Intervals.apk \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "NOOP Intervals (latest build)" \
+            --notes "Built from ${GITHUB_SHA::7}. Download NOOP-Intervals.apk on your phone and install."
+      # Failure logs go to a public release asset so they can be read without signing in.
+      - name: Publish build log on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f build.log ] || echo "Gradle did not run. Check the 'Apply pending patches' step." > build.log
+          grep -E "^e: |error:|FAILED|What went wrong" -A3 build.log > errors.txt || true
+          gh release delete intervals-build-log --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create intervals-build-log build.log errors.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "NOOP Intervals build log (failed)" --notes "Failed build ${GITHUB_SHA::7}"
