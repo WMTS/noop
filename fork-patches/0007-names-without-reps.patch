@@ -1,0 +1,82 @@
+diff --git a/android/app/src/main/java/com/noop/intervals/IntervalProgram.kt b/android/app/src/main/java/com/noop/intervals/IntervalProgram.kt
+index 3ba1a52..521a054 100644
+--- a/android/app/src/main/java/com/noop/intervals/IntervalProgram.kt
++++ b/android/app/src/main/java/com/noop/intervals/IntervalProgram.kt
+@@ -143,7 +143,7 @@ data class IntervalProgram(
+ 
+         /** A run:walk preset, e.g. 4:1 = 4 min run, 1 min walk, with a 5 min walking warm-up and cool-down. */
+         private fun runWalk(id: String, runMin: Int, rounds: Int) = IntervalProgram(
+-            id = id, name = "Run/walk $runMin:1 ($runMin min run / 1 min walk x $rounds)",
++            id = id, name = "Run/walk $runMin:1 ($runMin min run / 1 min walk)",
+             warmupSeconds = 300, rounds = rounds, cooldownSeconds = 300,
+             block = listOf(
+                 IntervalStep(StepKind.WORK, runMin * 60, "Run"),
+@@ -155,19 +155,19 @@ data class IntervalProgram(
+         /** Built-in presets. Ids are stable so a saved "last used" keeps pointing at the right one. */
+         val presets: List<IntervalProgram> = listOf(
+             IntervalProgram(
+-                id = "preset.tabata", name = "Tabata (20/10 x 8)",
++                id = "preset.tabata", name = "Tabata 20/10",
+                 warmupSeconds = 0, rounds = 8,
+                 block = listOf(IntervalStep(StepKind.WORK, 20), IntervalStep(StepKind.REST, 10)),
+                 builtIn = true,
+             ),
+             IntervalProgram(
+-                id = "preset.hiit3030", name = "HIIT 30/30 x 10",
++                id = "preset.hiit3030", name = "HIIT 30/30",
+                 warmupSeconds = 300, rounds = 10, cooldownSeconds = 300,
+                 block = listOf(IntervalStep(StepKind.WORK, 30), IntervalStep(StepKind.REST, 30)),
+                 builtIn = true,
+             ),
+             IntervalProgram(
+-                id = "preset.run1min", name = "Run: 6 x 1 min hard / 90 s easy",
++                id = "preset.run1min", name = "Run: 1 min hard / 90 s easy",
+                 warmupSeconds = 300, rounds = 6, cooldownSeconds = 300,
+                 block = listOf(
+                     IntervalStep(StepKind.WORK, 60, "Hard"),
+diff --git a/android/app/src/main/java/com/noop/ui/IntervalComponents.kt b/android/app/src/main/java/com/noop/ui/IntervalComponents.kt
+index 73662c0..60ce389 100644
+--- a/android/app/src/main/java/com/noop/ui/IntervalComponents.kt
++++ b/android/app/src/main/java/com/noop/ui/IntervalComponents.kt
+@@ -92,12 +92,17 @@ internal fun ivColor(kind: StepKind?): Color = when (kind) {
+     null -> Palette.statusPositive
+ }
+ 
+-/** One-line description of a program: "5:00 warm-up · 6 x (1:00 Hard / 1:30 Easy) · 5:00 cool-down". */
+-internal fun ivSummary(p: IntervalProgram): String {
++/**
++ * One-line description of a program: "5:00 warm-up · 6 x (1:00 Hard / 1:30 Easy) · 5:00 cool-down".
++ * With [showReps] false (program lists, where repetitions are chosen at start) the count is left out:
++ * "5:00 warm-up · 1:00 Hard / 1:30 Easy · 5:00 cool-down".
++ */
++internal fun ivSummary(p: IntervalProgram, showReps: Boolean = true): String {
+     val parts = mutableListOf<String>()
+     if (p.warmupSeconds > 0) parts += "${ivClock(p.warmupSeconds)} warm-up"
+     val block = p.block.filter { it.seconds > 0 }.joinToString(" / ") { "${ivClock(it.seconds)} ${it.displayName}" }
+     parts += when {
++        !showReps -> block
+         p.openEnded -> "∞ x ($block)"
+         p.rounds > 1 -> "${p.rounds} x ($block)"
+         else -> block
+@@ -348,7 +353,7 @@ internal fun IntervalProgramPickerDialog(
+                         ) {
+                             Text(p.name, style = NoopType.body, color = Palette.textPrimary)
+                             Text(
+-                                ivSummary(p),
++                                ivSummary(p, showReps = false),
+                                 style = NoopType.footnote, color = Palette.textTertiary, maxLines = 2,
+                                 overflow = TextOverflow.Ellipsis,
+                             )
+diff --git a/android/app/src/main/java/com/noop/ui/IntervalsScreen.kt b/android/app/src/main/java/com/noop/ui/IntervalsScreen.kt
+index 7fb0d8c..9aec318 100644
+--- a/android/app/src/main/java/com/noop/ui/IntervalsScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/IntervalsScreen.kt
+@@ -383,7 +383,7 @@ private fun ProgramRow(
+                 maxLines = 1, overflow = TextOverflow.Ellipsis,
+             )
+             Text(
+-                "${ivTotal(program)} · ${ivSummary(program)}",
++                ivSummary(program, showReps = false),
+                 style = NoopType.footnote, color = Palette.textTertiary,
+                 maxLines = 2, overflow = TextOverflow.Ellipsis,
+             )
