@@ -1670,6 +1670,13 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
                 CardDivider()
                 IntervalSplitsSection(row.startTs)
             }
+            // Fork: which shoes this run was on (changeable), for on-foot workouts.
+            if (row.sport in com.noop.analytics.WorkoutSport.ON_FOOT_SPORTS ||
+                com.noop.intervals.ShoeStore.shoeForRun(splitsCtx, row.startTs) != null
+            ) {
+                CardDivider()
+                WorkoutShoeSection(row)
+            }
 
             // Export the recorded GPS route as a GPX/FIT file (Strava / Garmin Connect / any GPS app).
             // Only when a route with a drawable path was recorded; the file is built on-device and shared.

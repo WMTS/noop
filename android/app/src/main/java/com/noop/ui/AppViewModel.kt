@@ -1612,6 +1612,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         gpsEnabled: Boolean = false,
         intervalProgram: com.noop.intervals.IntervalProgram? = null,
         hrCapZone: Int = 0,
+        shoeId: String? = null,
     ) {
         if (_activeWorkout.value != null) return
         _lastWorkout.value = null
@@ -1643,6 +1644,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         requestRealtimeHr()
         // Fork: run an interval program alongside this workout; it records per-interval splits.
         intervalProgram?.let { com.noop.intervals.IntervalEngine.start(appContext, it, linkedWorkoutStartMs = startMs) }
+        // Fork: log this run on a shoe now (0 distance), so a process kill mid-run still keeps the link;
+        // endWorkout fills in the final distance, a discarded run removes it again.
+        shoeId?.let { com.noop.intervals.ShoeStore.assign(appContext, startMs / 1000, it, 0.0) }
         // Fork: heart-rate ceiling alert ("stay in Zone N or below").
         if (hrCapZone > 0 || com.noop.intervals.HrCapPrefs.targetAvg(appContext) > 0) {
             com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
@@ -1758,6 +1762,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (intervalsLinkedTo(w)) com.noop.intervals.IntervalEngine.stop(saveSplits = false)
         stopHrGuardFor(w)
         releaseRealtimeHr()
+        com.noop.intervals.ShoeStore.unassign(appContext, w.startMs / 1000)
         _activeWorkout.value = null
         gpsJob?.cancel(); gpsJob = null
         activeWorkoutStore.clear()
@@ -1806,6 +1811,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     hrSamples = samples.size, gpsPoints = if (w.gpsEnabled) track.size else null,
                 )
             }
+            com.noop.intervals.ShoeStore.unassign(appContext, w.startMs / 1000)
             _lastWorkout.value = null
             return
         }
@@ -1823,6 +1829,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     gpsPoints = if (w.gpsEnabled) track.size else null,
                 )
             }
+            com.noop.intervals.ShoeStore.unassign(appContext, w.startMs / 1000)
             _lastWorkout.value = null
             return
         }
@@ -1870,6 +1877,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             routePolyline = if (track.size >= 2) RouteMath.encode(track) else null,
         )
         _lastWorkout.value = row
+        // Fork: add this run's distance to the shoe it was logged on.
+        com.noop.intervals.ShoeStore.onRunEdited(appContext, row.startTs, row.startTs, row.distanceM)
         // Workouts & GPS test mode: one session-end summary tagged .workouts (the lastSessionSummary readout
         // source) carrying the captured HR window size, the duration, and the accepted GPS point count (the
         // final track), so the lifecycle of a saved session is visible end to end. Zero-cost when off.
@@ -2306,6 +2315,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun saveManualWorkout(row: WorkoutRow, replacing: WorkoutRow? = null) {
         viewModelScope.launch {
             runCatching { repository.saveManualWorkout(row, replacing) }
+            // Fork: an edited run keeps its shoe, with the new start and distance (e.g. a treadmill
+            // distance typed in afterwards).
+            replacing?.let { com.noop.intervals.ShoeStore.onRunEdited(appContext, it.startTs, row.startTs, row.distanceM) }
             // #598: rescore the just-added workout from the strap's HR for its window NOW, so its average /
             // peak HR, strain and calories appear immediately instead of waiting for the next analyze tick.
             // No-ops when there's no strap HR for the window; never overrides a value the user typed.
@@ -2348,6 +2360,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteWorkout(row: WorkoutRow) {
         viewModelScope.launch {
             runCatching { repository.deleteWorkout(row) }
+            com.noop.intervals.ShoeStore.unassign(appContext, row.startTs)
             loadWorkouts()
             // #1195 follow-up: a workout removed in NOOP is removed from Health Connect too, so a session
             // we wrote (manual or live) doesn't linger there after the user deletes it here. Opt-in, keyed

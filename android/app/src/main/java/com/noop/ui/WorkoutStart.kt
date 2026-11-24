@@ -76,6 +76,13 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
     var hrCustomBpm by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.customBpm(context)) }
     var hrTargetAvg by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.targetAvg(context)) }
     var pickingHrCap by remember { mutableStateOf(false) }
+    // Fork: shoe for this run; running sports start on the default pair.
+    var shoeId by remember(selected) {
+        mutableStateOf(
+            if (com.noop.intervals.ShoeMath.defaultsToShoe(selected.name)) com.noop.intervals.ShoeStore.defaultId(context) else null,
+        )
+    }
+    var pickingShoe by remember { mutableStateOf(false) }
     var gpsOn by remember(selected) { mutableStateOf(selected.isDistanceSport) }
     val filtered = WorkoutSport.all.filter { it.name.contains(query, ignoreCase = true) }
     // #297: the user's last selections, one tap away above the full catalogue. Only catalogue-resolvable
@@ -94,7 +101,7 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
     // Workouts) that use this sheet get the live workout without each screen wiring it.
     var showLiveWorkout by remember { mutableStateOf(false) }
     val startWithGps = rememberRequestLocation { granted ->
-        vm.startWorkout(selected, gpsEnabled = gpsOn && granted, intervalProgram = intervalProgram, hrCapZone = hrCapZone)
+        vm.startWorkout(selected, gpsEnabled = gpsOn && granted, intervalProgram = intervalProgram, hrCapZone = hrCapZone, shoeId = shoeId)
         showLiveWorkout = true
     }
 
@@ -183,6 +190,23 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
                     )
                     androidx.compose.material3.TextButton(onClick = { pickingHrCap = true }) { Text("Choose") }
                 }
+                // Fork: which shoes this run's miles go on.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Shoes", style = NoopType.body, color = Palette.textPrimary)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        com.noop.intervals.ShoeStore.find(context, shoeId)?.name ?: "None",
+                        style = NoopType.body,
+                        color = if (shoeId != null) Palette.accent else Palette.textTertiary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    androidx.compose.material3.TextButton(onClick = { pickingShoe = true }) { Text("Choose") }
+                }
             }
         },
         confirmButton = {
@@ -193,7 +217,7 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
                 if (gpsOn) {
                     startWithGps() // requests location, then starts + opens live workout in the callback (#101)
                 } else {
-                    vm.startWorkout(selected, gpsEnabled = false, intervalProgram = intervalProgram, hrCapZone = hrCapZone)
+                    vm.startWorkout(selected, gpsEnabled = false, intervalProgram = intervalProgram, hrCapZone = hrCapZone, shoeId = shoeId)
                     showLiveWorkout = true
                 }
             }) {
@@ -275,6 +299,13 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
                 }
             },
             confirmButton = { Button(onClick = { pickingHrCap = false }) { Text("Done") } },
+        )
+    }
+    if (pickingShoe) {
+        ShoePickerDialog(
+            selectedId = shoeId,
+            onDismiss = { pickingShoe = false },
+            onPick = { id -> shoeId = id; pickingShoe = false },
         )
     }
     if (pickingProgram) {

@@ -1292,6 +1292,9 @@ fun SettingsScreen(
             }
         }
 
+        // Fork (Rick): shoe mileage tracker.
+        ShoesSettingsCard()
+
         // --- Daily cycle ---
         SettingsCard(
             icon = Icons.Filled.Autorenew,
