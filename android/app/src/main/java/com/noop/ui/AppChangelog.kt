@@ -37,6 +37,27 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        // Fork (Rick): what NOOP Runner adds, and how its numbers are worked out. Not a version bump, so the
+        // sheet does not pop up by itself; it sits at the top of Settings > What's new.
+        Release(
+            version = "Runner",
+            title = "NOOP Runner: running features and how they are calculated",
+            date = "November 2026",
+            items = listOf(
+                "**Interval timer.** Warm-up, work and rest blocks, rounds, sets and cool-down, with saved programs and presets (Tabata, HIIT, run/walk 4:1, 6:1, 8:1, pyramid). Pick repetitions when you start (∞ repeats until you stop). Voice, beeps, a 3-2-1 countdown, phone vibration and a strap buzz call each change, and it keeps running with the screen off. More > Intervals.",
+                "**Run with intervals.** Attach a program when you start a workout or mid-run. Each step's time, distance, pace and average and max heart rate are saved and shown on the workout.",
+                "**Heart-rate alert.** Set a stay-below ceiling (a bpm or the top of a zone) and a target average; you are told when you go over and hear your average every 10 minutes. Start a workout > HR alert.",
+                "**Calories from distance.** Runs and walks with a distance are costed with the ACSM running and walking equations: about 1 kcal per kg per km running and half that walking, whatever the pace. With intervals, each step is costed as a run or a walk, so walk breaks are not counted at running cost. Climbing adds ACSM's grade term (0.9 ml/kg per metre climbed running, 1.8 walking); descents are not credited. Workouts without a distance use heart rate (Keytel).",
+                "**Elevation gain.** GPS workouts record how much you climbed, from the phone's barometer when it has one, otherwise from GPS altitude. Readings are smoothed and a climb only counts once it rises past a small threshold (2 m barometer, 5 m GPS), so sensor noise on flat ground adds nothing. Shown on the workout and used for calories.",
+                "**Smoother GPS distance.** Each GPS fix is averaged with the two before it, and distance only builds once you have moved 4 m from the last counted point. Standing at a light or walking a break no longer adds distance from GPS wobble, which keeps distance, pace, splits, calories and shoe miles honest. The route map is left as recorded.",
+                "**Zones from your resting heart rate.** Optional heart-rate reserve (Karvonen) zones: each zone starts at resting + 50/60/70/80/90% of (max - resting), using the strap's 7-day median resting heart rate, and follow it as it changes. Live zones, workout zones, zone coaching and the HR alert all use them. Settings > Runner heart rate.",
+                "**Max heart rate from your workouts.** NOOP Runner finds the highest heart rate you held for 15 seconds in the past year of workouts (a 15-second average ignores one-off sensor spikes) and offers it as your max when it is above the current one. It never changes your max by itself. Settings > Runner heart rate.",
+                "**Shoe tracker.** Several pairs, a default pair, a mileage limit, starting miles and retirement. Runs add their distance to the pair you pick. Settings > Shoes.",
+                "**Health Connect.** Workouts share their interval segments, laps and active calories as well as distance and heart rate. GPS routes are not shared.",
+                "**Indigo theme and a runner's Today.** An Indigo preset with a ribbed dark backdrop and hex entry for any accent; Today has a Start workout card, and the finished workout opens when you press End.",
+                "**Each workout says how it was worked out.** Workouts recorded in NOOP Runner list where their distance, calories and zones came from, in a How these numbers were worked out section.",
+            ),
+        ),
         Release(
             version = "12.0.0",
             title = uiString(R.string.l10n_app_changelog_today_your_way_heart_rate_any_5e1308b3),

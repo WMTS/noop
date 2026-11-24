@@ -60,7 +60,7 @@ object GpsSession {
         val s = _state.value
         if (!s.active || s.paused) return
         val track = s.track + pt
-        val dist = RouteMath.totalMeters(track)
+        val dist = com.noop.intervals.RunDistance.meters(track) // Fork: GPS jitter smoothed out of distance
         val secs = (System.currentTimeMillis() - s.startMs - s.pausedDurationMs) / 1000.0
         _state.value = s.copy(track = track, distanceM = dist, paceSecPerKm = RouteMath.paceSecPerKm(dist, secs))
         // Workouts & GPS test mode: one GPS-fix-progress line per accepted fix, only when the service wired a

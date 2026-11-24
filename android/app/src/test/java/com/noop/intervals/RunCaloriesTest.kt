@@ -55,4 +55,21 @@ class RunCaloriesTest {
         val sp = IntervalSplit(2, StepKind.WORK, "Run", 2, 1, 240, 800.0, 150, 160, startMs = 1000L, endMs = 241000L)
         assertEquals(sp, IntervalSplit.fromJson(sp.toJson()))
     }
+    @Test fun climb_addsAcsmGradeTerm() {
+        val flat = RunCalories.estimate("Running", 5000.0, 30 * 60.0, 70.0)!!
+        val hilly = RunCalories.estimate("Running", 5000.0, 30 * 60.0, 70.0, climbM = 100.0)!!
+        assertEquals(0.9 * 100 * 70 / 1000 * 5, hilly.activeKcal - flat.activeKcal, 0.01) // 31.5 kcal
+    }
+
+    @Test fun climb_walkingCostsDouble() {
+        val flat = RunCalories.estimate("Walking", 3000.0, 36 * 60.0, 70.0)!!
+        val hilly = RunCalories.estimate("Walking", 3000.0, 36 * 60.0, 70.0, climbM = 50.0)!!
+        assertEquals(1.8 * 50 * 70 / 1000 * 5, hilly.activeKcal - flat.activeKcal, 0.01)
+    }
+
+    @Test fun climb_isCappedAtQuarterOfDistance() {
+        val flat = RunCalories.estimate("Running", 1000.0, 6 * 60.0, 70.0)!!
+        val bogus = RunCalories.estimate("Running", 1000.0, 6 * 60.0, 70.0, climbM = 900.0)!!
+        assertEquals(0.9 * 250 * 70 / 1000 * 5, bogus.activeKcal - flat.activeKcal, 0.01)
+    }
 }

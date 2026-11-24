@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Close
@@ -94,6 +95,20 @@ private enum class PrimerSection(
             "point contribution.",
         icon = Icons.Filled.Calculate,
     ),
+    // Fork (Rick): how NOOP Runner measures runs and workouts.
+    RUNNING(
+        title = "How runs and workouts are measured",
+        body = "Distance is your GPS route, with standing-still wobble smoothed out (each fix is averaged " +
+            "with the two before it and distance only builds after you move 4 m). Runs and walks with a " +
+            "distance get calories from the ACSM running and walking equations, about 1 kcal per kg per km " +
+            "running and half that walking, plus a climbing term from the elevation the barometer (or GPS) " +
+            "recorded. Without a distance, calories come from heart rate. Heart-rate zones are a percentage " +
+            "of your max heart rate, or, if you turn it on in Settings > Runner heart rate, of your heart-rate " +
+            "reserve (resting to max, using your strap's 7-day resting heart rate). Max heart rate is the age " +
+            "formula (208 - 0.7 x age) until you set one, and NOOP Runner suggests one from the highest heart " +
+            "rate you held for 15 seconds in a workout. Each recorded workout lists how its numbers were worked out.",
+        icon = Icons.AutoMirrored.Filled.DirectionsRun,
+    ),
     RECORDING(
         title = uiString(R.string.l10n_how_noop_works_screen_what_recording_means_b896c422),
         body = "When your strap is connected NOOP is saving data live. \"Last synced\" tells " +
@@ -113,6 +128,7 @@ private enum class PrimerSection(
             SLEEP -> Palette.metricPurple        // sleep world
             SCORES -> Palette.accent             // the daily scores' gold
             SCORE_RECIPE -> Palette.chargeColor  // the Charge world the recipe explains
+            RUNNING -> Palette.accent            // Fork: runs and workouts
             RECORDING -> Palette.metricCyan      // live / sensor signal
             PROVENANCE -> Palette.metricCyan     // the By-Day provenance badge tint
         }

@@ -423,8 +423,12 @@ private fun ZoneRail(zone: Int, zoneSet: com.noop.analytics.HrZoneSet) {
         }
         // The bpm band of the current zone, so the rail reads as concrete, not abstract.
         val band = zoneSet.zones.firstOrNull { it.number == zone }
+        // Fork: with heart-rate reserve zones the band is % of reserve, not % of max.
+        val reserveZones = com.noop.intervals.RunnerHrStore.reserveZones(LocalContext.current)
         Text(
-            if (band != null)
+            if (band != null && reserveZones)
+                "Zone $zone: ${band.lower.toInt()} - ${band.upper.toInt()} bpm (${zone * 10 + 40} - ${zone * 10 + 50}% of heart-rate reserve)"
+            else if (band != null)
                 "Zone $zone: ${band.lower.toInt()} - ${band.upper.toInt()} bpm (${(band.lowerPct * 100).toInt()} - ${(band.upperPct * 100).toInt()}% max HR)"
             else "Warming up - keep moving to climb into Zone 1.",
             style = NoopType.footnote,

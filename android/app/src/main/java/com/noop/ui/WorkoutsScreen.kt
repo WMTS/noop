@@ -1649,7 +1649,11 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
                     }
                     Text(
                         if (zonesFromImport) "WHOOP's imported per-zone split for this session."
-                        else "Time in each %HRmax zone, derived from the strap's heart rate over this window (approximate).",
+                        else "Time in each zone, derived from the strap's heart rate over this window (approximate). " + // Fork: names the zone model
+                            runnerZoneSentence(
+                                com.noop.intervals.RunnerHrStore.reserveZones(LocalContext.current),
+                                ProfileStore.from(LocalContext.current).hasCustomHrZones,
+                            ),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )
@@ -1677,6 +1681,10 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
                 CardDivider()
                 WorkoutShoeSection(row)
             }
+            // Fork: elevation gain, when it was recorded for this workout.
+            WorkoutElevationSection(row.startTs) { CardDivider() }
+            // Fork: where this workout's distance, calories and zones came from.
+            RunnerMethodNote(row) { CardDivider() }
 
             // Export the recorded GPS route as a GPX/FIT file (Strava / Garmin Connect / any GPS app).
             // Only when a route with a drawable path was recorded; the file is built on-device and shared.

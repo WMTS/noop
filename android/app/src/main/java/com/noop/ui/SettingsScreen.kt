@@ -1205,7 +1205,10 @@ fun SettingsScreen(
                 if (profile.hasCustomHrZones) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = uiString(R.string.l10n_settings_screen_custom_hr_zones_hint_f7fa3bae),
+                        // Fork: say when these starts come from Runner heart rate (resting HR zones).
+                        text = if (com.noop.intervals.RunnerHrStore.reserveZones(context))
+                            "Set from your resting and max heart rate by Runner heart rate (below). Changing a zone here switches that off and keeps your edit."
+                        else uiString(R.string.l10n_settings_screen_custom_hr_zones_hint_f7fa3bae),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )
@@ -1294,6 +1297,8 @@ fun SettingsScreen(
 
         // Fork (Rick): shoe mileage tracker.
         ShoesSettingsCard()
+        // Fork (Rick): heart-rate reserve zones and max HR from workouts.
+        RunnerHrSettingsCard(vm, rev) { rev++ }
 
         // --- Daily cycle ---
         SettingsCard(

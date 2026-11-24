@@ -909,6 +909,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // export can answer "what ran when". Idempotent — the stored last-seen version only advances
         // once the transition is recorded, so a background-only launch is caught on the next UI open.
         viewModelScope.launch { recordAppVersionChange() }
+        // Fork: resting HR for heart-rate reserve zones, and workout peaks for the max HR suggestion.
+        viewModelScope.launch { com.noop.intervals.RunnerHrSync.startup(appContext, profileStore, recentDays) }
+        forkScanPeaks(delayMs = 20_000)
         // #1121: re-arm the opt-in detailed-capture rolling log on launch, so a capture the user started
         // keeps going across the process being killed (this phone class is not battery-exempt and Android
         // kills the background BLE overnight — the very window a battery capture needs to span).
@@ -1652,9 +1655,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // Fork: log this run on a shoe now (0 distance), so a process kill mid-run still keeps the link;
         // endWorkout fills in the final distance, a discarded run removes it again.
         shoeId?.let { com.noop.intervals.ShoeStore.assign(appContext, startMs / 1000, it, 0.0) }
+        // Fork: zones follow the latest resting / max HR; record elevation gain on GPS workouts.
+        com.noop.intervals.RunnerHrSync.sync(appContext, profileStore)
+        if (gpsEnabled) com.noop.intervals.ElevationTracker.start(appContext)
         // Fork: heart-rate ceiling alert ("stay in Zone N or below").
         if (hrCapZone > 0 || com.noop.intervals.HrCapPrefs.targetAvg(appContext) > 0) {
             com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
+        }
+    }
+
+    /** Fork: find each recent workout's sustained peak HR (once per workout) for the max HR suggestion. */
+    private fun forkScanPeaks(delayMs: Long = 0) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (delayMs > 0) delay(delayMs)
+            runCatching {
+                com.noop.intervals.MaxHrScan.run(
+                    appContext,
+                    workouts = { from, to -> repository.workoutsUnion(deviceId, from, to) },
+                    hr = { r -> repository.hrSamplesUnion(deviceId, r.startTs, r.endTs) },
+                )
+            }
         }
     }
 
@@ -1766,6 +1786,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val w = _activeWorkout.value ?: return
         if (intervalsLinkedTo(w)) com.noop.intervals.IntervalEngine.stop(saveSplits = false)
         stopHrGuardFor(w)
+        com.noop.intervals.ElevationTracker.stop() // Fork
         releaseRealtimeHr()
         com.noop.intervals.ShoeStore.unassign(appContext, w.startMs / 1000)
         _activeWorkout.value = null
@@ -1789,6 +1810,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             com.noop.intervals.IntervalEngine.stop(saveSplits = true, workoutStartTs = w.startMs / 1000)
         }
         stopHrGuardFor(w)
+        val forkClimb = com.noop.intervals.ElevationTracker.stop() // Fork: elevation gain, saved with the row below
         releaseRealtimeHr()
         _activeWorkout.value = null
         gpsJob?.cancel(); gpsJob = null
@@ -1799,7 +1821,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // ViewModel was cleared mid-ride (screen off), so [w.track] may be stale. Stop it and take its
         // final track. A non-GPS workout has nothing in the session, so fall back to the local track. (#215)
         val track = if (w.gpsEnabled) GpsSession.stop() else w.track
-        val distanceM = if (w.gpsEnabled) RouteMath.totalMeters(track) else w.distanceM
+        val distanceM = if (w.gpsEnabled) com.noop.intervals.RunDistance.meters(track) else w.distanceM // Fork: smoothed
         // If we promoted the foreground service ONLY to keep GPS tracking alive (the user hasn't opted
         // into the background connection), drop it now the route is finished — otherwise a lingering
         // "Connected" notification would outlive the workout. With background-connection on, leave it
@@ -1866,13 +1888,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         else null
         // Fork (Rick): for runs and walks with a distance, cost energy from distance + time (ACSM), per
         // interval step when there are splits, instead of heart rate alone. Falls back to the HR estimate.
-        val footKcal = com.noop.intervals.RunCalories.estimate(
+        val forkFoot = com.noop.intervals.RunCalories.estimate(
             sport = w.sport.name,
             distanceM = distanceM.takeIf { it > 0 },
             durationS = activeDurationMs / 1000.0,
             weightKg = profileStore.weightKg,
             splits = com.noop.intervals.IntervalSplitStore.load(appContext, w.startMs / 1000)?.splits.orEmpty(),
-        )?.grossKcal
+            climbM = forkClimb?.gainM ?: 0.0,
+        )
+        val footKcal = forkFoot?.grossKcal
         val row = WorkoutRow(
             deviceId = deviceId, startTs = w.startMs / 1000, endTs = endMs / 1000,
             sport = w.sport.name, source = "manual", durationS = activeDurationMs / 1000.0,
@@ -1884,6 +1908,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _lastWorkout.value = row
         // Fork: add this run's distance to the shoe it was logged on.
         com.noop.intervals.ShoeStore.onRunEdited(appContext, row.startTs, row.startTs, row.distanceM)
+        forkClimb?.let { com.noop.intervals.ElevationStore.save(appContext, row.startTs, it) }
+        com.noop.intervals.RunMethodStore.save(
+            appContext, row.startTs,
+            calories = forkFoot?.method ?: if (energyKcal != null) "hr" else null,
+            gpsDistance = w.gpsEnabled && track.size >= 2,
+        )
         // Workouts & GPS test mode: one session-end summary tagged .workouts (the lastSessionSummary readout
         // source) carrying the captured HR window size, the duration, and the accepted GPS point count (the
         // final track), so the lifecycle of a saved session is visible end to end. Zero-cost when off.
@@ -1908,6 +1938,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (saved) loadWorkouts()
             // Fork: show the finished workout's detail (after its row + HR are stored, so it is complete).
             if (saved) _finishedWorkout.value = row
+            if (saved) forkScanPeaks()
             if (_hcWriteback.value) {
                 runCatching { HealthConnectWriter.writeExercise(appContext, row, w.sport.exerciseType) }
                 // #528: export the just-captured HR series now (workout row already upserted above, so
@@ -2325,6 +2356,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // Fork: an edited run keeps its shoe, with the new start and distance (e.g. a treadmill
             // distance typed in afterwards).
             replacing?.let { com.noop.intervals.ShoeStore.onRunEdited(appContext, it.startTs, row.startTs, row.distanceM) }
+            replacing?.let { com.noop.intervals.RunMethodStore.remove(appContext, it.startTs) } // Fork: note no longer true
             // #598: rescore the just-added workout from the strap's HR for its window NOW, so its average /
             // peak HR, strain and calories appear immediately instead of waiting for the next analyze tick.
             // No-ops when there's no strap HR for the window; never overrides a value the user typed.

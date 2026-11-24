@@ -13,8 +13,12 @@ package com.noop.intervals
  *   kcal     = VO2 x weightKg x minutes / 1000 x 5   (about 5 kcal per litre of O2)
  *
  * "Active" is that minus the resting 3.5 (1 MET), which for running works out to about
- * 1 kcal per kg per km whatever the pace, and about 0.5 for walking. No grade term: the GPS
- * track has no elevation, so hilly routes will read a little low.
+ * 1 kcal per kg per km whatever the pace, and about 0.5 for walking.
+ *
+ * Hills: when the workout recorded an elevation gain ([ElevationTracker]), ACSM's grade term is added:
+ * 0.9 ml/kg per metre climbed running, 1.8 walking (split by how much of the distance was run or
+ * walked). Descents are not credited, as in ACSM. A climb over 25% of the distance is treated as bad
+ * sensor data and capped.
  *
  * With interval splits, each step is costed on its own (run steps as running, walk breaks as
  * walking), which is where run/walk sessions gain the most. Pure; unit-tested.
@@ -44,6 +48,7 @@ object RunCalories {
         durationS: Double,
         weightKg: Double,
         splits: List<IntervalSplit> = emptyList(),
+        climbM: Double = 0.0,
     ): Estimate? {
         if (!applies(sport) || weightKg <= 0 || durationS < 60) return null
         val total = distanceM ?: return null
@@ -53,6 +58,8 @@ object RunCalories {
         var activeMlPerKg = 0.0 // sum of (VO2 - 3.5) x minutes, in ml/kg
         var coveredM = 0.0
         var coveredS = 0.0
+        var runM = 0.0
+        var walkM = 0.0
         val usable = splits.filter { (it.distanceM ?: -1.0) >= 0 && it.durationS > 0 }
         var segmented = false
         for (sp in usable) {
@@ -60,6 +67,7 @@ object RunCalories {
             val min = sp.durationS / 60.0
             val running = isRunning(d / min, sportIsWalk, effortHint = sp.kind.isEffort)
             activeMlPerKg += (if (running) 0.2 else 0.1) * d
+            if (running) runM += d else walkM += d
             coveredM += d
             coveredS += sp.durationS
             segmented = true
@@ -70,6 +78,11 @@ object RunCalories {
         if (restM > 0 && restS > 0) {
             val running = isRunning(restM / (restS / 60.0), sportIsWalk, effortHint = !sportIsWalk)
             activeMlPerKg += (if (running) 0.2 else 0.1) * restM
+            if (running) runM += restM else walkM += restM
+        }
+        val climb = climbM.coerceIn(0.0, 0.25 * total)
+        if (climb > 0 && runM + walkM > 0) {
+            activeMlPerKg += climb * (RUN_CLIMB * runM + WALK_CLIMB * walkM) / (runM + walkM)
         }
         val activeKcal = activeMlPerKg * weightKg / 1000.0 * 5.0
         val restingKcal = 3.5 * weightKg * (durationS / 60.0) / 1000.0 * 5.0
@@ -79,6 +92,10 @@ object RunCalories {
             method = if (segmented) "acsm-intervals" else "acsm",
         )
     }
+
+    /** ACSM grade term per metre climbed (ml/kg): 0.9 x speed x grade running, 1.8 walking. */
+    private const val RUN_CLIMB = 0.9
+    private const val WALK_CLIMB = 1.8
 
     private fun isRunning(speedMPerMin: Double, sportIsWalk: Boolean, effortHint: Boolean): Boolean = when {
         speedMPerMin >= RUN_MIN_M_PER_MIN -> true
