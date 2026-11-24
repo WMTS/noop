@@ -59,6 +59,8 @@ fun screenBackdropSlot(
     skyBehindCards: Boolean,
 ): (@Composable () -> Unit)? = when {
     BackgroundImageStore.isActive -> { { BackgroundImageBackdrop() } }
+    // Fork (Rick): the Indigo theme's ribbed texture, behind the whole screen.
+    IndigoTheme.active && !Palette.isLight -> { { IndigoTextureBackdrop() } }
     showDayCycleBackground -> { { LiquidScreenSky(fillHeight = skyBehindCards) } }
     else -> null
 }
@@ -68,7 +70,8 @@ fun screenBackdropSlot(
 fun screenBackdropFullBleed(
     showDayCycleBackground: Boolean,
     skyBehindCards: Boolean,
-): Boolean = BackgroundImageStore.isActive || (showDayCycleBackground && skyBehindCards)
+): Boolean = BackgroundImageStore.isActive || (IndigoTheme.active && !Palette.isLight) ||
+    (showDayCycleBackground && skyBehindCards)
 
 /** The reusable liquid sky backdrop for a liquid screen's top region. Drop it into a scaffold's
  *  `topBackground` slot. [height] is the sky band; the sky fades into the theme canvas within it, so the

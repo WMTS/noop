@@ -75,8 +75,8 @@ internal fun ivClock(seconds: Int): String {
 
 /** Colour for a step kind, in the app's existing Effort / Rest colour worlds. */
 internal fun ivColor(kind: StepKind?): Color = when (kind) {
-    StepKind.WORK -> Palette.effortColor
-    StepKind.REST, StepKind.SET_REST -> Palette.restColor
+    StepKind.WORK -> if (IndigoTheme.active) IndigoTheme.work else Palette.effortColor
+    StepKind.REST, StepKind.SET_REST -> if (IndigoTheme.active) IndigoTheme.rest else Palette.restColor
     StepKind.WARMUP, StepKind.COOLDOWN -> Palette.statusPositive
     null -> Palette.statusPositive
 }

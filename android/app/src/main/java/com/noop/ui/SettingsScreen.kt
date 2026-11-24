@@ -1560,6 +1560,11 @@ fun SettingsScreen(
                             ChartStylePrefs.set(context, chart)
                             NoopPrefs.setShowDayCycleBackground(context, p.backdrop)
                             NoopPrefs.setCardOpacityPercent(context, p.cardOpacity)
+                            // Fork (Rick): Indigo is a dark theme (its ribbed texture only shows in Dark).
+                            if (p == ThemePreset.INDIGO) {
+                                themeMode = AppearanceMode.DARK
+                                AppearancePrefs.set(context, AppearanceMode.DARK)
+                            }
                         }
                     },
                 )
@@ -1605,7 +1610,7 @@ fun SettingsScreen(
             // colours follow "Chart colours", never this. Custom reveals RGB sliders.
             SettingsFormRow(label = uiString(R.string.l10n_settings_screen_accent)) {
                 SegmentedPillControl(
-                    items = listOf(AccentColor.MINT, AccentColor.WHOOP_BLUE, AccentColor.CUSTOM),
+                    items = listOf(AccentColor.MINT, AccentColor.WHOOP_BLUE, AccentColor.INDIGO, AccentColor.CUSTOM),
                     selection = accentColor,
                     label = { it.label },
                     onSelect = { c ->
@@ -4344,6 +4349,45 @@ private fun AccentCustomPicker(hex: String, onHexChange: (String) -> Unit) {
                     .border(2.dp, Color.White, CircleShape),
             )
         }
+        // Fork (Rick): type an exact colour code (e.g. #4F2FFF) instead of dragging.
+        var hexText by remember { mutableStateOf(hex.uppercase()) }
+        // Keep the box in step with drags; leave a typed code alone when it already matches (within
+        // rounding) so the HSV round trip never rewrites what was typed.
+        LaunchedEffect(hue, sat, value) {
+            val c = hsvColor(hue, sat, value)
+            val typed = AccentColor.parseHex(hexText, Color.Unspecified)
+            val close = typed != Color.Unspecified &&
+                kotlin.math.abs(typed.red - c.red) < 0.012f &&
+                kotlin.math.abs(typed.green - c.green) < 0.012f &&
+                kotlin.math.abs(typed.blue - c.blue) < 0.012f
+            if (!close) {
+                hexText = String.format(
+                    "#%02X%02X%02X",
+                    (c.red * 255).roundToInt(), (c.green * 255).roundToInt(), (c.blue * 255).roundToInt(),
+                )
+            }
+        }
+        OutlinedTextField(
+            value = hexText,
+            onValueChange = { raw ->
+                val t = raw.trim().uppercase().let { if (it.startsWith("#")) it else "#$it" }.take(7)
+                hexText = t
+                val parsed = AccentColor.parseHex(t, Color.Unspecified)
+                if (t.length == 7 && parsed != Color.Unspecified) {
+                    val hsv = FloatArray(3)
+                    android.graphics.Color.RGBToHSV(
+                        (parsed.red * 255).roundToInt(), (parsed.green * 255).roundToInt(),
+                        (parsed.blue * 255).roundToInt(), hsv,
+                    )
+                    hue = hsv[0]; sat = hsv[1]; value = hsv[2]
+                    onHexChange(t)
+                }
+            },
+            label = { Text("Colour code") },
+            placeholder = { Text("#4F2FFF") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

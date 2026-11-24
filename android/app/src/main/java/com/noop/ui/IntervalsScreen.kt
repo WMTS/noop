@@ -78,9 +78,14 @@ fun IntervalsScreen(vm: AppViewModel) {
     val running = st.active && !st.finished
     val linkedToRun = st.active && st.linkedWorkoutStartMs != null
 
+    // Same backdrop as the other tabs (custom image > Indigo texture > sky > flat canvas).
+    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
+    val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
     LazyScreenScaffold(
         title = uiString(R.string.l10n_intervals_screen_interval_timer_1d703deb),
         subtitle = "Voice, beep and strap cues. Keeps running with the screen off.",
+        topBackground = screenBackdropSlot(showDayCycleBackground, skyBehindCards),
+        fullBleedBackground = screenBackdropFullBleed(showDayCycleBackground, skyBehindCards),
     ) {
         // --- Status row ---
         item {
@@ -214,8 +219,8 @@ private fun ReadyHero(
     onRunWithGps: () -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Metrics.cardRadius))) {
-        ScenicHeroBackground(modifier = Modifier.matchParentSize(), domain = DomainTheme.Effort)
-        NoopCard(padding = 24.dp, tint = Palette.effortColor) {
+        if (!IndigoTheme.active) ScenicHeroBackground(modifier = Modifier.matchParentSize(), domain = DomainTheme.Effort)
+        NoopCard(padding = 24.dp, tint = if (IndigoTheme.active) IndigoTheme.work else Palette.effortColor) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(program.name, style = NoopType.title2, color = Palette.textPrimary)
                 Text(ivSummary(program), style = NoopType.subhead, color = Palette.textSecondary)
@@ -233,7 +238,10 @@ private fun ReadyHero(
                         onClick = onRunWithGps,
                         enabled = canRunWithGps,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Palette.effortColor, contentColor = Palette.surfaceBase),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (IndigoTheme.active) IndigoTheme.work else Palette.effortColor,
+                            contentColor = Palette.surfaceBase,
+                        ),
                     ) {
                         Icon(Icons.AutoMirrored.Filled.DirectionsRun, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
                         Text("Run with GPS", style = NoopType.headline)
@@ -256,15 +264,16 @@ private fun TimerHero(st: IntervalEngine.State, linkedToRun: Boolean) {
     val color = if (st.finished) Palette.statusPositive else ivColor(cur?.kind)
     val stops = when {
         st.finished -> listOf(0f to Palette.statusPositive.copy(alpha = 0.6f), 1f to Palette.statusPositive)
-        cur?.kind == StepKind.WORK -> Palette.effortGradientStops
-        cur?.kind == StepKind.REST || cur?.kind == StepKind.SET_REST -> Palette.restGradientStops
+        cur?.kind == StepKind.WORK -> if (IndigoTheme.active) IndigoTheme.workStops else Palette.effortGradientStops
+        cur?.kind == StepKind.REST || cur?.kind == StepKind.SET_REST ->
+            if (IndigoTheme.active) IndigoTheme.restStops else Palette.restGradientStops
         else -> listOf(0f to Palette.statusPositive.copy(alpha = 0.6f), 1f to Palette.statusPositive)
     }
     val fraction = if (st.finished || cur == null) 1.0
     else ((cur.seconds - st.remainingS).toDouble() / cur.seconds.coerceAtLeast(1)).coerceIn(0.0, 1.0)
 
     Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Metrics.cardRadius))) {
-        ScenicHeroBackground(modifier = Modifier.matchParentSize(), domain = DomainTheme.Effort)
+        if (!IndigoTheme.active) ScenicHeroBackground(modifier = Modifier.matchParentSize(), domain = DomainTheme.Effort)
         NoopCard(padding = 24.dp, tint = color) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -293,7 +302,10 @@ private fun TimerHero(st: IntervalEngine.State, linkedToRun: Boolean) {
                     Spacer(Modifier.weight(1f))
                     Text("${ivClock(st.totalS - st.elapsedS)} left", style = NoopType.bodyNumber, color = Palette.textSecondary)
                 }
-                IvProgressBar(if (st.totalS > 0) st.elapsedS.toFloat() / st.totalS else 0f, Palette.effortColor)
+                IvProgressBar(
+                    if (st.totalS > 0) st.elapsedS.toFloat() / st.totalS else 0f,
+                    if (IndigoTheme.active) IndigoTheme.work else Palette.effortColor,
+                )
 
                 if (linkedToRun) {
                     Text(

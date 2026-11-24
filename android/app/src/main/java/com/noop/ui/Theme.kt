@@ -86,16 +86,19 @@ object Palette {
         AccentColor.MINT -> active.accent
         AccentColor.WHOOP_BLUE -> if (isLight) Color(0xFF234F9E) else Color(0xFF60A0E0)
         AccentColor.CUSTOM -> AccentColor.parseHex(AccentPrefs.customHex, active.accent)
+        AccentColor.INDIGO -> IndigoTheme.accent(isLight)
     }
     val accentHover get() = when (AccentPrefs.color) {
         AccentColor.MINT -> active.accentHover
         AccentColor.WHOOP_BLUE -> if (isLight) Color(0xFF3A6FC0) else Color(0xFF8FBEEC)
         AccentColor.CUSTOM -> AccentColor.lighten(AccentPrefs.customHex)
+        AccentColor.INDIGO -> IndigoTheme.accentHover(isLight)
     }
     val accentMuted get() = when (AccentPrefs.color) {
         AccentColor.MINT -> active.accentMuted
         AccentColor.WHOOP_BLUE -> (if (isLight) Color(0xFF234F9E) else Color(0xFF60A0E0)).copy(alpha = 0.18f)
         AccentColor.CUSTOM -> AccentColor.parseHex(AccentPrefs.customHex, active.accent).copy(alpha = 0.18f)
+        AccentColor.INDIGO -> IndigoTheme.accent(isLight).copy(alpha = 0.18f)
     }
     val focusRing get() = if (AccentPrefs.color == AccentColor.MINT) active.focusRing else accent
     const val disabledOpacity = 0.45f

@@ -330,6 +330,8 @@ object AppearancePrefs {
 enum class AccentColor(val storageValue: String, val label: String) {
     MINT("mint", "Mint"),
     WHOOP_BLUE("whoopBlue", "WHOOP Blue"),
+    // Fork (Rick): electric blue-violet with a dark ribbed backdrop. See IndigoTheme.
+    INDIGO("indigo", "Indigo"),
     CUSTOM("custom", "Custom");
 
     companion object {
@@ -408,6 +410,8 @@ enum class ThemePreset(
     CLASSIC("classic", "Classic", AccentColor.WHOOP_BLUE, ChartStyle.CLASSIC, true, 100),
     MIDNIGHT("midnight", "Midnight", AccentColor.MINT, ChartStyle.TITANIUM, false, 100),
     FROSTED("frosted", "Frosted", AccentColor.MINT, ChartStyle.TITANIUM, true, 85),
+    // Fork (Rick): Indigo accent, no sky (the ribbed texture replaces it), cards slightly see-through.
+    INDIGO("indigo", "Indigo", AccentColor.INDIGO, ChartStyle.TITANIUM, false, 88),
     CUSTOM("custom", "Custom", null, null, true, 100);
 
     companion object {
