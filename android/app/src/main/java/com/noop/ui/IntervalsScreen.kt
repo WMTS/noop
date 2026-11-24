@@ -383,7 +383,7 @@ private fun ProgramRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "${ivTotal(program)} · ${ivSummary(program)}",
+                ivSummary(program, showReps = false),
                 style = NoopType.footnote, color = Palette.textTertiary,
                 maxLines = 2, overflow = TextOverflow.Ellipsis,
             )

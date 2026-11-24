@@ -143,7 +143,7 @@ data class IntervalProgram(
 
         /** A run:walk preset, e.g. 4:1 = 4 min run, 1 min walk, with a 5 min walking warm-up and cool-down. */
         private fun runWalk(id: String, runMin: Int, rounds: Int) = IntervalProgram(
-            id = id, name = "Run/walk $runMin:1 ($runMin min run / 1 min walk x $rounds)",
+            id = id, name = "Run/walk $runMin:1 ($runMin min run / 1 min walk)",
             warmupSeconds = 300, rounds = rounds, cooldownSeconds = 300,
             block = listOf(
                 IntervalStep(StepKind.WORK, runMin * 60, "Run"),
@@ -155,19 +155,19 @@ data class IntervalProgram(
         /** Built-in presets. Ids are stable so a saved "last used" keeps pointing at the right one. */
         val presets: List<IntervalProgram> = listOf(
             IntervalProgram(
-                id = "preset.tabata", name = "Tabata (20/10 x 8)",
+                id = "preset.tabata", name = "Tabata 20/10",
                 warmupSeconds = 0, rounds = 8,
                 block = listOf(IntervalStep(StepKind.WORK, 20), IntervalStep(StepKind.REST, 10)),
                 builtIn = true,
             ),
             IntervalProgram(
-                id = "preset.hiit3030", name = "HIIT 30/30 x 10",
+                id = "preset.hiit3030", name = "HIIT 30/30",
                 warmupSeconds = 300, rounds = 10, cooldownSeconds = 300,
                 block = listOf(IntervalStep(StepKind.WORK, 30), IntervalStep(StepKind.REST, 30)),
                 builtIn = true,
             ),
             IntervalProgram(
-                id = "preset.run1min", name = "Run: 6 x 1 min hard / 90 s easy",
+                id = "preset.run1min", name = "Run: 1 min hard / 90 s easy",
                 warmupSeconds = 300, rounds = 6, cooldownSeconds = 300,
                 block = listOf(
                     IntervalStep(StepKind.WORK, 60, "Hard"),

@@ -92,12 +92,17 @@ internal fun ivColor(kind: StepKind?): Color = when (kind) {
     null -> Palette.statusPositive
 }
 
-/** One-line description of a program: "5:00 warm-up · 6 x (1:00 Hard / 1:30 Easy) · 5:00 cool-down". */
-internal fun ivSummary(p: IntervalProgram): String {
+/**
+ * One-line description of a program: "5:00 warm-up · 6 x (1:00 Hard / 1:30 Easy) · 5:00 cool-down".
+ * With [showReps] false (program lists, where repetitions are chosen at start) the count is left out:
+ * "5:00 warm-up · 1:00 Hard / 1:30 Easy · 5:00 cool-down".
+ */
+internal fun ivSummary(p: IntervalProgram, showReps: Boolean = true): String {
     val parts = mutableListOf<String>()
     if (p.warmupSeconds > 0) parts += "${ivClock(p.warmupSeconds)} warm-up"
     val block = p.block.filter { it.seconds > 0 }.joinToString(" / ") { "${ivClock(it.seconds)} ${it.displayName}" }
     parts += when {
+        !showReps -> block
         p.openEnded -> "∞ x ($block)"
         p.rounds > 1 -> "${p.rounds} x ($block)"
         else -> block
@@ -348,7 +353,7 @@ internal fun IntervalProgramPickerDialog(
                         ) {
                             Text(p.name, style = NoopType.body, color = Palette.textPrimary)
                             Text(
-                                ivSummary(p),
+                                ivSummary(p, showReps = false),
                                 style = NoopType.footnote, color = Palette.textTertiary, maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
