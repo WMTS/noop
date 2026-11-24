@@ -1,7 +1,7 @@
-# Rick fork: build the "NOOP Intervals" debug APK and publish it to a rolling release, so the
+# Rick fork: build the "NOOP Runner" debug APK and publish it to a rolling release, so the
 # newest build can be downloaded straight to the phone from the repo's Releases page.
 # Runs on every push to the intervals branch, or by hand from the Actions tab.
-name: NOOP Intervals APK
+name: NOOP Runner APK
 
 on:
   push:
@@ -56,12 +56,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/full/debug/*.apk NOOP-Intervals.apk
+          cp app/build/outputs/apk/full/debug/*.apk NOOP-Runner.apk
           gh release delete intervals-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-          gh release create intervals-latest NOOP-Intervals.apk \
+          gh release create intervals-latest NOOP-Runner.apk \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-            --title "NOOP Intervals (latest build)" \
-            --notes "Built from ${GITHUB_SHA::7}. Download NOOP-Intervals.apk on your phone and install."
+            --title "NOOP Runner (latest build)" \
+            --notes "Built from ${GITHUB_SHA::7}. Download NOOP-Runner.apk on your phone and install."
       # Failure logs go to a public release asset so they can be read without signing in.
       - name: Publish build log on failure
         if: failure()
@@ -73,4 +73,4 @@ jobs:
           gh release delete intervals-build-log --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
           gh release create intervals-build-log build.log errors.txt \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-            --title "NOOP Intervals build log (failed)" --notes "Failed build ${GITHUB_SHA::7}"
+            --title "NOOP Runner build log (failed)" --notes "Failed build ${GITHUB_SHA::7}"
