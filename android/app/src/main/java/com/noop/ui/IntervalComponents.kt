@@ -73,6 +73,17 @@ internal fun ivClock(seconds: Int): String {
     else String.format(Locale.US, "%d:%02d", s / 60, s % 60)
 }
 
+/** Planned length of a program, or the infinity sign when it repeats until stopped. */
+internal fun ivTotal(p: IntervalProgram): String = if (p.openEnded) "∞" else ivClock(p.totalSeconds())
+
+/** "Round 3/8", "Round 3/8 · Set 1/2", or "Round 3" for an open-ended program; null when not a round step. */
+internal fun ivRoundLabel(cur: com.noop.intervals.TimelineStep?, sep: String = " · "): String? {
+    if (cur == null || cur.round <= 0) return null
+    if (cur.rounds == 0) return "Round ${cur.round}"
+    if (cur.rounds <= 1) return null
+    return "Round ${cur.round}/${cur.rounds}" + if (cur.sets > 1) "${sep}Set ${cur.set}/${cur.sets}" else ""
+}
+
 /** Colour for a step kind, in the app's existing Effort / Rest colour worlds. */
 internal fun ivColor(kind: StepKind?): Color = when (kind) {
     StepKind.WORK -> if (IndigoTheme.active) IndigoTheme.work else Palette.effortColor
@@ -86,7 +97,11 @@ internal fun ivSummary(p: IntervalProgram): String {
     val parts = mutableListOf<String>()
     if (p.warmupSeconds > 0) parts += "${ivClock(p.warmupSeconds)} warm-up"
     val block = p.block.filter { it.seconds > 0 }.joinToString(" / ") { "${ivClock(it.seconds)} ${it.displayName}" }
-    parts += if (p.rounds > 1) "${p.rounds} x ($block)" else block
+    parts += when {
+        p.openEnded -> "∞ x ($block)"
+        p.rounds > 1 -> "${p.rounds} x ($block)"
+        else -> block
+    }
     if (p.sets > 1) parts += "${p.sets} sets" + if (p.setRestSeconds > 0) " (${ivClock(p.setRestSeconds)} between)" else ""
     if (p.cooldownSeconds > 0) parts += "${ivClock(p.cooldownSeconds)} cool-down"
     return parts.joinToString(" · ")
@@ -134,11 +149,8 @@ internal fun IntervalRunPanel(workoutStartMs: Long, workoutPaused: Boolean) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Overline(st.program?.name ?: "Intervals", color = Palette.textSecondary)
                 Spacer(Modifier.weight(1f))
-                if (cur != null && cur.round > 0 && cur.rounds > 1) {
-                    Text(
-                        "Round ${cur.round}/${cur.rounds}" + if (cur.sets > 1) " · Set ${cur.set}/${cur.sets}" else "",
-                        style = NoopType.captionNumber, color = Palette.textSecondary,
-                    )
+                ivRoundLabel(cur)?.let {
+                    Text(it, style = NoopType.captionNumber, color = Palette.textSecondary)
                 }
             }
             if (st.finished) {
@@ -283,6 +295,36 @@ private fun SplitCell(text: String, modifier: Modifier, color: Color = Palette.t
 
 // MARK: - Program picker
 
+/**
+ * Repetitions control: starts at ∞ (repeat until you stop); + steps 1, 2 ... up to 25; − from 1 goes
+ * back to ∞. [reps] 0 means ∞.
+ */
+@Composable
+internal fun RepsStepper(reps: Int, onChange: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Repetitions", style = NoopType.headline, color = Palette.textPrimary)
+            Text(
+                if (reps == 0) "Repeats until you stop" else "Then the cool-down",
+                style = NoopType.footnote, color = Palette.textTertiary,
+            )
+        }
+        IvStepButton(Icons.Filled.Remove, "Fewer repetitions", reps > 0, Palette.textPrimary) {
+            onChange(if (reps <= 1) 0 else reps - 1)
+        }
+        Text(
+            if (reps == 0) "∞" else reps.toString(),
+            style = NoopType.number(26f), color = Palette.accent,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.width(52.dp),
+        )
+        IvStepButton(Icons.Filled.Add, "More repetitions", reps < IntervalProgram.MAX_PICK_ROUNDS, Palette.textPrimary) {
+            onChange((reps + 1).coerceAtMost(IntervalProgram.MAX_PICK_ROUNDS))
+        }
+    }
+}
+
+/** Pick a program, then how many repetitions (default ∞). Returns the program with those rounds. */
 @Composable
 internal fun IntervalProgramPickerDialog(
     title: String,
@@ -291,27 +333,50 @@ internal fun IntervalProgramPickerDialog(
 ) {
     val context = LocalContext.current
     val programs = remember { IntervalProgramStore.all(context) }
+    var chosen by remember { mutableStateOf<IntervalProgram?>(null) }
+    var reps by remember { mutableIntStateOf(0) }
+    val pick = chosen
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { Text(pick?.name ?: title) },
         text = {
-            Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                programs.forEach { p ->
-                    Column(
-                        modifier = Modifier.fillMaxWidth().clickable { onPick(p) }.padding(vertical = 10.dp),
-                    ) {
-                        Text(p.name, style = NoopType.body, color = Palette.textPrimary)
-                        Text(
-                            "${ivClock(p.totalSeconds())} · ${ivSummary(p)}",
-                            style = NoopType.footnote, color = Palette.textTertiary, maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+            if (pick == null) {
+                Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    programs.forEach { p ->
+                        Column(
+                            modifier = Modifier.fillMaxWidth().clickable { chosen = p; reps = 0 }.padding(vertical = 10.dp),
+                        ) {
+                            Text(p.name, style = NoopType.body, color = Palette.textPrimary)
+                            Text(
+                                ivSummary(p),
+                                style = NoopType.footnote, color = Palette.textTertiary, maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
+                }
+            } else {
+                val withReps = pick.copy(rounds = reps)
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(ivSummary(withReps), style = NoopType.subhead, color = Palette.textSecondary)
+                    RepsStepper(reps) { reps = it }
+                    Text(
+                        if (withReps.openEnded) "Length: until you stop" else "Length: ${ivClock(withReps.totalSeconds())}",
+                        style = NoopType.bodyNumber, color = Palette.textPrimary,
+                    )
                 }
             }
         },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {
+            if (pick != null) {
+                Button(onClick = { onPick(pick.copy(rounds = reps)) }) { Text("Use") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { if (pick != null) chosen = null else onDismiss() }) {
+                Text(if (pick != null) "Back" else "Cancel")
+            }
+        },
     )
 }
 

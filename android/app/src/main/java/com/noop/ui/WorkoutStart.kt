@@ -55,7 +55,12 @@ import kotlinx.coroutines.delay
  * the workout has started (or the user cancels).
  */
 @Composable
-fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId: String? = null) {
+fun StartWorkoutSheet(
+    vm: AppViewModel,
+    onDismiss: () -> Unit,
+    initialProgramId: String? = null,
+    initialRounds: Int? = null,
+) {
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     // Fork: coming from the Intervals screen's "Run with GPS", preselect Running.
@@ -68,7 +73,10 @@ fun StartWorkoutSheet(vm: AppViewModel, onDismiss: () -> Unit, initialProgramId:
     }
     // Fork: optional interval program to run alongside the recording (records per-interval splits).
     var intervalProgram by remember {
-        mutableStateOf(com.noop.intervals.IntervalProgramStore.find(context, initialProgramId))
+        mutableStateOf(
+            com.noop.intervals.IntervalProgramStore.find(context, initialProgramId)
+                ?.let { p -> if (initialRounds != null) p.copy(rounds = initialRounds) else p },
+        )
     }
     var pickingProgram by remember { mutableStateOf(false) }
     // Fork: heart-rate ceiling alert, remembered between runs. 0 = off.

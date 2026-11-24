@@ -106,4 +106,21 @@ class IntervalProgramTest {
             assertEquals("Run", p.expand()[1].name)
         }
     }
+
+    @Test fun openEndedRepeatsWithoutCooldown() {
+        val p = simple(240, 60, 0, warm = 300, cool = 300)
+        assertTrue(p.openEnded)
+        val steps = p.expand()
+        assertEquals(StepKind.WARMUP, steps.first().kind)
+        assertTrue(steps.none { it.kind == StepKind.COOLDOWN })
+        assertTrue(steps.size > 100)
+        assertEquals(0, steps[1].rounds)       // shown as "Round n", not "n of 400"
+        assertEquals(3, steps[5].round)
+        assertEquals(0, p.totalSeconds())
+    }
+
+    @Test fun pickedRepsReplaceProgramRounds() {
+        val p = IntervalProgram.presets.first { it.id == "preset.walkrun" }.copy(rounds = 3)
+        assertEquals(300 + 3 * 240 + 2 * 60 + 300, p.totalSeconds())
+    }
 }

@@ -806,6 +806,9 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             }
         }
 
+        // Fork (NOOP Runner): open the run you just finished, wherever End was pressed.
+        FinishedWorkoutHost(viewModel)
+
         // Quick-actions sheet, opened by the raised gold centre FAB. Each row routes to an
         // existing destination — nothing new is built here, the FAB is just a faster door in.
         if (showQuickActions) {

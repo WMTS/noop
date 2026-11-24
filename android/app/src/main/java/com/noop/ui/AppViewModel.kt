@@ -1564,6 +1564,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _lastWorkout = MutableStateFlow<WorkoutRow?>(null)
     val lastWorkout: StateFlow<WorkoutRow?> = _lastWorkout.asStateFlow()
 
+    /** Fork: the workout that was just saved, so the app can open its detail right after End. */
+    private val _finishedWorkout = MutableStateFlow<WorkoutRow?>(null)
+    val finishedWorkout: StateFlow<WorkoutRow?> = _finishedWorkout.asStateFlow()
+    fun clearFinishedWorkout() { _finishedWorkout.value = null }
+
     /** One-shot: the Today "workout in progress" indicator card raises this (via [openActiveWorkout]) so the
      *  Live screen presents the in-exercise overlay for an ALREADY-RUNNING workout. The overlay normally only
      *  opens at workout start (StartWorkoutSheet), so this is the single path that re-opens it for a session
@@ -1901,6 +1906,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // after the row and HR are persisted so its sessions, stats and first-workout empty state
             // update without leaving and re-entering the screen.
             if (saved) loadWorkouts()
+            // Fork: show the finished workout's detail (after its row + HR are stored, so it is complete).
+            if (saved) _finishedWorkout.value = row
             if (_hcWriteback.value) {
                 runCatching { HealthConnectWriter.writeExercise(appContext, row, w.sport.exerciseType) }
                 // #528: export the just-captured HR series now (workout row already upserted above, so

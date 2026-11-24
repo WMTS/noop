@@ -95,7 +95,8 @@ object IntervalEngine {
         if (steps.isEmpty()) return
 
         cues = IntervalCues(ctx).also { it.open() }
-        acquireWakeLock(ctx, program.totalSeconds())
+        // Open-ended sessions have no planned end; hold the CPU for up to 4 hours.
+        acquireWakeLock(ctx, if (program.openEnded) 4 * 3600 else program.totalSeconds())
         // Keep the process alive with the screen off. Idempotent if a GPS run already started it.
         WhoopConnectionService.start(ctx)
         startedService = true
@@ -110,7 +111,7 @@ object IntervalEngine {
             steps = steps,
             index = 0,
             remainingS = steps[0].seconds,
-            totalS = steps.sumOf { it.seconds },
+            totalS = if (program.openEnded) 0 else steps.sumOf { it.seconds },
             linkedWorkoutStartMs = linkedWorkoutStartMs,
         )
         // TTS needs a moment to initialise the first time; give the opening call a short head start.
@@ -240,7 +241,7 @@ object IntervalEngine {
             cues?.speak("Halfway")
         }
 
-        val elapsedS = (elapsed / 1000L).toInt().coerceIn(0, s.totalS)
+        val elapsedS = (elapsed / 1000L).toInt().let { if (s.totalS > 0) it.coerceIn(0, s.totalS) else it.coerceAtLeast(0) }
         if (pos.index != s.index || remainingS != s.remainingS || elapsedS != s.elapsedS || splits !== s.splits) {
             _state.value = s.copy(index = pos.index, remainingS = remainingS, elapsedS = elapsedS, splits = splits)
         }
@@ -296,7 +297,9 @@ object IntervalEngine {
         if (settings.voice) {
             val parts = mutableListOf<String>()
             parts += "${step.name}, ${spokenDuration(step.seconds)}"
-            if (step.kind.isEffort && step.rounds > 1) {
+            if (step.kind.isEffort && step.rounds == 0 && step.round > 0) {
+                parts += "round ${step.round}"
+            } else if (step.kind.isEffort && step.rounds > 1) {
                 parts += if (step.sets > 1) "round ${step.round} of ${step.rounds}, set ${step.set}"
                 else "round ${step.round} of ${step.rounds}"
             }

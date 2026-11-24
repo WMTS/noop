@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -69,6 +70,8 @@ fun IntervalsScreen(vm: AppViewModel) {
         mutableStateOf(IntervalProgramStore.lastUsedId(context) ?: IntervalProgram.presets.first().id)
     }
     val selected = programs.firstOrNull { it.id == selectedId } ?: programs.first()
+    // Repetitions for this session: starts at ∞ for every program; + picks 1..25.
+    var reps by remember(selected.id) { mutableIntStateOf(0) }
 
     var editing by remember { mutableStateOf<IntervalProgram?>(null) }
     var confirmDelete by remember { mutableStateOf<IntervalProgram?>(null) }
@@ -109,9 +112,11 @@ fun IntervalsScreen(vm: AppViewModel) {
                 TimerHero(st, linkedToRun)
             } else {
                 ReadyHero(
-                    program = selected,
+                    program = selected.copy(rounds = reps),
+                    reps = reps,
+                    onRepsChange = { reps = it },
                     canRunWithGps = activeWorkout == null,
-                    onStart = { IntervalEngine.start(context, selected) },
+                    onStart = { IntervalEngine.start(context, selected.copy(rounds = reps)) },
                     onRunWithGps = {
                         IntervalProgramStore.setLastUsed(context, selected.id)
                         showRunSheet = true
@@ -207,13 +212,18 @@ fun IntervalsScreen(vm: AppViewModel) {
     }
 
     if (showRunSheet) {
-        StartWorkoutSheet(vm = vm, onDismiss = { showRunSheet = false }, initialProgramId = selected.id)
+        StartWorkoutSheet(
+            vm = vm, onDismiss = { showRunSheet = false },
+            initialProgramId = selected.id, initialRounds = reps,
+        )
     }
 }
 
 @Composable
 private fun ReadyHero(
     program: IntervalProgram,
+    reps: Int,
+    onRepsChange: (Int) -> Unit,
     canRunWithGps: Boolean,
     onStart: () -> Unit,
     onRunWithGps: () -> Unit,
@@ -224,7 +234,8 @@ private fun ReadyHero(
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(program.name, style = NoopType.title2, color = Palette.textPrimary)
                 Text(ivSummary(program), style = NoopType.subhead, color = Palette.textSecondary)
-                Text(ivClock(program.totalSeconds()), style = NoopType.number(48f), color = Palette.textPrimary)
+                Text(ivTotal(program), style = NoopType.number(48f), color = Palette.textPrimary)
+                RepsStepper(reps, onRepsChange)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(
                         onClick = onStart,
@@ -279,11 +290,8 @@ private fun TimerHero(st: IntervalEngine.State, linkedToRun: Boolean) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IvChip(if (st.finished) "DONE" else (cur?.name ?: "").uppercase(), color)
                     Spacer(Modifier.weight(1f))
-                    if (cur != null && cur.round > 0 && cur.rounds > 1) {
-                        Text(
-                            "Round ${cur.round}/${cur.rounds}" + if (cur.sets > 1) "  Set ${cur.set}/${cur.sets}" else "",
-                            style = NoopType.number(16f), color = Palette.textSecondary,
-                        )
+                    ivRoundLabel(cur, sep = "  ")?.let {
+                        Text(it, style = NoopType.number(16f), color = Palette.textSecondary)
                     }
                 }
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -297,15 +305,20 @@ private fun TimerHero(st: IntervalEngine.State, linkedToRun: Boolean) {
                         lineWidth = 18.dp,
                     )
                 }
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Text("${ivClock(st.elapsedS)} / ${ivClock(st.totalS)}", style = NoopType.bodyNumber, color = Palette.textPrimary)
-                    Spacer(Modifier.weight(1f))
-                    Text("${ivClock(st.totalS - st.elapsedS)} left", style = NoopType.bodyNumber, color = Palette.textSecondary)
+                if (st.totalS > 0) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text("${ivClock(st.elapsedS)} / ${ivClock(st.totalS)}", style = NoopType.bodyNumber, color = Palette.textPrimary)
+                        Spacer(Modifier.weight(1f))
+                        Text("${ivClock(st.totalS - st.elapsedS)} left", style = NoopType.bodyNumber, color = Palette.textSecondary)
+                    }
+                    IvProgressBar(
+                        st.elapsedS.toFloat() / st.totalS,
+                        if (IndigoTheme.active) IndigoTheme.work else Palette.effortColor,
+                    )
+                } else {
+                    // Open-ended: no planned end, just the time so far.
+                    Text("${ivClock(st.elapsedS)} elapsed · repeats until you stop", style = NoopType.bodyNumber, color = Palette.textPrimary)
                 }
-                IvProgressBar(
-                    if (st.totalS > 0) st.elapsedS.toFloat() / st.totalS else 0f,
-                    if (IndigoTheme.active) IndigoTheme.work else Palette.effortColor,
-                )
 
                 if (linkedToRun) {
                     Text(
@@ -370,7 +383,7 @@ private fun ProgramRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "${ivClock(program.totalSeconds())} · ${ivSummary(program)}",
+                "${ivTotal(program)} · ${ivSummary(program)}",
                 style = NoopType.footnote, color = Palette.textTertiary,
                 maxLines = 2, overflow = TextOverflow.Ellipsis,
             )

@@ -770,6 +770,8 @@ fun TodayScreen(
     // here (null ↔ runner only — the per-second snapshot is scoped inside the entry card) so a running
     // session keeps its way-back-in card even if the beta flag was just switched off.
     var showLiveSession by remember { mutableStateOf(false) }
+    // Fork (NOOP Runner): the slot shows "Start workout" instead of the beta "Start session".
+    var showStartWorkout by remember { mutableStateOf(false) }
     val liveSessionsEnabled = remember { LiveSessionPrefs.enabled(context) }
     val activeLiveSession by LiveSessionRunner.active.collectAsStateWithLifecycle()
     // The journal widget's own opt-out (default ON). Read here too so its reorderable section emits no
@@ -1663,7 +1665,9 @@ fun TodayScreen(
             }
             val sectionVisible = when (section) {
                 TodaySection.LIVE_SESSION ->
-                    selectedDayOffset == 0 && (liveSessionsEnabled || activeLiveSession != null)
+                    // Fork: always on Today (it is now the Start workout card), hidden while a workout runs
+                    // (the in-progress card above is the way back in then).
+                    selectedDayOffset == 0 && (activeWorkout == null || activeLiveSession != null)
                 TodaySection.YOUR_CARDS ->
                     selectedDayOffset == 0 && visibleDashboardCards.isNotEmpty()
                 TodaySection.MENSTRUAL_CYCLE ->
@@ -1760,7 +1764,9 @@ fun TodayScreen(
                         // session keeps the card visible regardless (it is the designed way back into the
                         // dismissed session dialog, see LiveSessionRunner's lifetime note). The gate lives
                         // at the loop level (sectionVisible) so a gated-off section emits no item.
-                        TodaySection.LIVE_SESSION -> LiveSessionEntryCard(
+                        TodaySection.LIVE_SESSION -> if (activeLiveSession == null) {
+                            StartWorkoutEntryCard(onOpen = { showStartWorkout = true })
+                        } else LiveSessionEntryCard(
                             onOpen = {
                                 // Only BEGIN when nothing is in flight: an active runner (running, or ended
                                 // and holding its unseen summary) is simply re-presented, never displaced —
@@ -2049,6 +2055,9 @@ fun TodayScreen(
     // screen: the runner (held in LiveSessionRunner.active, ticking on the app-wide viewModelScope)
     // keeps guarding, and the entry card above re-opens the same session. Only "End session" + the
     // summary's "Done" (inside the screen) actually finish and clear it.
+    if (showStartWorkout) {
+        StartWorkoutSheet(vm = viewModel, onDismiss = { showStartWorkout = false })
+    }
     if (showLiveSession) {
         Dialog(
             onDismissRequest = { showLiveSession = false },

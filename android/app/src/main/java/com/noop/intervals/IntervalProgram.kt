@@ -58,6 +58,9 @@ data class IntervalProgram(
     val cooldownSeconds: Int = 0,
     val builtIn: Boolean = false,
 ) {
+    /** Fork: rounds <= 0 means "repeat until you stop" (shown as ∞). */
+    val openEnded: Boolean get() = rounds <= 0
+
     /** True when the block is the plain work/rest pair, so the simple editor can show it. */
     val isSimple: Boolean
         get() = block.size == 2 && block[0].kind == StepKind.WORK && block[1].kind == StepKind.REST
@@ -65,9 +68,12 @@ data class IntervalProgram(
     /** Expand into the flat list of steps that actually run. Zero-length steps are skipped. */
     fun expand(): List<TimelineStep> {
         val out = mutableListOf<TimelineStep>()
-        val r = rounds.coerceAtLeast(1)
-        val s = sets.coerceAtLeast(1)
-        if (warmupSeconds > 0) out += TimelineStep(StepKind.WARMUP, warmupSeconds, "Warm-up", 0, r, 0, s)
+        // Open-ended: enough rounds that nobody runs out (the run's End stops it), one set, no cool-down.
+        // Steps carry rounds = 0 so the UI and voice say "round 7", not "round 7 of 400".
+        val r = if (openEnded) OPEN_ENDED_ROUNDS else rounds.coerceAtLeast(1)
+        val s = if (openEnded) 1 else sets.coerceAtLeast(1)
+        val shownRounds = if (openEnded) 0 else r
+        if (warmupSeconds > 0) out += TimelineStep(StepKind.WARMUP, warmupSeconds, "Warm-up", 0, shownRounds, 0, s)
         val blockSteps = block.filter { it.seconds > 0 }
         for (set in 1..s) {
             for (round in 1..r) {
@@ -75,17 +81,20 @@ data class IntervalProgram(
                 // cool-down (or simply the finish) follows instead. Same as the original timer, which
                 // never ran a rest after the final work block.
                 val steps = if (round == r) blockSteps.dropLastWhile { it.kind.isRecovery } else blockSteps
-                for (st in steps) out += TimelineStep(st.kind, st.seconds, st.displayName, round, r, set, s)
+                for (st in steps) out += TimelineStep(st.kind, st.seconds, st.displayName, round, shownRounds, set, s)
             }
             if (set < s && setRestSeconds > 0) {
-                out += TimelineStep(StepKind.SET_REST, setRestSeconds, "Set rest", 0, r, set, s)
+                out += TimelineStep(StepKind.SET_REST, setRestSeconds, "Set rest", 0, shownRounds, set, s)
             }
         }
-        if (cooldownSeconds > 0) out += TimelineStep(StepKind.COOLDOWN, cooldownSeconds, "Cool-down", 0, r, 0, s)
+        if (cooldownSeconds > 0 && !openEnded) {
+            out += TimelineStep(StepKind.COOLDOWN, cooldownSeconds, "Cool-down", 0, shownRounds, 0, s)
+        }
         return out
     }
 
-    fun totalSeconds(): Int = expand().sumOf { it.seconds }
+    /** Planned length in seconds; 0 for an open-ended program. */
+    fun totalSeconds(): Int = if (openEnded) 0 else expand().sumOf { it.seconds }
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -107,6 +116,12 @@ data class IntervalProgram(
     }
 
     companion object {
+        /** Rounds generated for an open-ended program (hours of running for any realistic block). */
+        const val OPEN_ENDED_ROUNDS = 400
+
+        /** Most repetitions offered by the picker. */
+        const val MAX_PICK_ROUNDS = 25
+
         fun fromJson(o: JSONObject): IntervalProgram? = runCatching {
             val arr = o.getJSONArray("block")
             val block = (0 until arr.length()).mapNotNull { i ->
