@@ -36,6 +36,8 @@ object UpdateCheck {
      *  (offline, rate-limited, malformed) resolves to [Result.Failed] so the caller shows a calm
      *  "try again" rather than crashing. */
     suspend fun check(currentVersion: String): Result = withContext(Dispatchers.IO) {
+        // Fork (Rick): NOOP Runner compares its own build number with the fork's, not NOOP's releases.
+        com.noop.intervals.RunnerUpdate.check(currentVersion)?.let { return@withContext it }
         runCatching {
             val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 12_000

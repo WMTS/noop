@@ -92,6 +92,12 @@ fun StartWorkoutSheet(
     }
     var pickingShoe by remember { mutableStateOf(false) }
     var gpsOn by remember(selected) { mutableStateOf(selected.isDistanceSport) }
+    // Fork: indoor track mode for runs and walks (GPS off, Lap button, laps per mile).
+    var indoor by remember(selected) {
+        mutableStateOf(com.noop.intervals.IndoorTrackStore.supports(selected.name) && com.noop.intervals.IndoorTrackStore.indoorMode(context))
+    }
+    var indoorTrack by remember { mutableStateOf(com.noop.intervals.IndoorTrackStore.defaultTrack(context)) }
+    var pickingTrack by remember { mutableStateOf(false) }
     val filtered = WorkoutSport.all.filter { it.name.contains(query, ignoreCase = true) }
     // #297: the user's last selections, one tap away above the full catalogue. Only catalogue-resolvable
     // recents show here — a live start selects a typed [Sport], and the shared store can hold free-typed
@@ -153,7 +159,19 @@ fun StartWorkoutSheet(
                         }
                     }
                 }
-                Row(
+                // Fork: runs and walks choose Outdoor (GPS) or Indoor track instead of the plain GPS switch.
+                if (com.noop.intervals.IndoorTrackStore.supports(selected.name)) {
+                    IndoorModeRow(
+                        indoor = indoor,
+                        onIndoorChange = {
+                            indoor = it; gpsOn = !it
+                            com.noop.intervals.IndoorTrackStore.setIndoorMode(context, it)
+                            if (it && indoorTrack == null) pickingTrack = true
+                        },
+                        track = indoorTrack,
+                        onPickTrack = { pickingTrack = true },
+                    )
+                } else Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 ) {
@@ -222,10 +240,16 @@ fun StartWorkoutSheet(
                 // #297: a confirmed start is a real selection — fold it into the recents (recorded even
                 // if the GPS permission is then denied; the workout still starts route-less, #101).
                 RecentSportsPrefs.record(context, selected.name)
-                if (gpsOn) {
+                val indoorRun = indoor && com.noop.intervals.IndoorTrackStore.supports(selected.name) // Fork
+                if (indoorRun && indoorTrack == null) {
+                    pickingTrack = true // Fork: an indoor run needs a track (lap length) first
+                } else if (gpsOn && !indoorRun) {
                     startWithGps() // requests location, then starts + opens live workout in the callback (#101)
                 } else {
-                    vm.startWorkout(selected, gpsEnabled = false, intervalProgram = intervalProgram, hrCapZone = hrCapZone, shoeId = shoeId)
+                    vm.startWorkout(
+                        selected, gpsEnabled = false, intervalProgram = intervalProgram, hrCapZone = hrCapZone, shoeId = shoeId,
+                        indoorTrack = if (indoorRun) indoorTrack else null,
+                    )
                     showLiveWorkout = true
                 }
             }) {
@@ -236,6 +260,18 @@ fun StartWorkoutSheet(
             OutlinedButton(onClick = onDismiss) { Text(uiString(R.string.l10n_workout_start_cancel_77dfd213)) }
         },
     )
+    // Fork: choose or add the indoor track (laps per mile or metres per lap).
+    if (pickingTrack) {
+        IndoorTrackPickerDialog(
+            selectedId = indoorTrack?.id,
+            onDismiss = { pickingTrack = false },
+            onPick = { t ->
+                indoorTrack = t
+                com.noop.intervals.IndoorTrackStore.setDefault(context, t.id)
+                pickingTrack = false
+            },
+        )
+    }
     if (pickingHrCap) {
         AlertDialog(
             onDismissRequest = { pickingHrCap = false },

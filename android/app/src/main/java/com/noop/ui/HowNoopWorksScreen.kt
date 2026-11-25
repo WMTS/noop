@@ -99,7 +99,8 @@ private enum class PrimerSection(
     RUNNING(
         title = "How runs and workouts are measured",
         body = "Distance is your GPS route, with standing-still wobble smoothed out (each fix is averaged " +
-            "with the two before it and distance only builds after you move 4 m). Runs and walks with a " +
+            "with the two before it and distance only builds after you move 4 m). On an indoor track, GPS is " +
+            "off and distance is the laps you tap times your track's lap length. Runs and walks with a " +
             "distance get calories from the ACSM running and walking equations, about 1 kcal per kg per km " +
             "running and half that walking, plus a climbing term from the elevation the barometer (or GPS) " +
             "recorded. Without a distance, calories come from heart rate. Heart-rate zones are a percentage " +

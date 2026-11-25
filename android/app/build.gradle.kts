@@ -60,7 +60,8 @@ android {
             isMinifyEnabled = false
             // Rick fork: own app id so it never collides with upstream's debug/staging builds.
             applicationIdSuffix = ".rick"
-            versionNameSuffix = "-intervals"
+            // Rick fork: "-runner.N", N from fork-version.txt at the repo root (bump it with each change).
+            versionNameSuffix = "-runner." + (runCatching { rootProject.file("../fork-version.txt").readText().trim() }.getOrNull() ?: "0")
         }
         release {
             // Shipped UNMINIFIED for reliability. R8 minification crashes this app at runtime: full-mode

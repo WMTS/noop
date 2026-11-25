@@ -449,6 +449,7 @@ object HealthConnectWriter {
         row: WorkoutRow,
         exerciseType: Int,
         splits: List<com.noop.intervals.IntervalSplit> = emptyList(),
+        trackLaps: List<Triple<Long, Long, Double>> = emptyList(),
     ): List<Record> {
         val start = Instant.ofEpochSecond(row.startTs)
         val end = Instant.ofEpochSecond(row.endTs)
@@ -463,7 +464,8 @@ object HealthConnectWriter {
         // Fork (Rick): interval steps become segments (run / walk) and laps (with distance), so a coach
         // sees each rep. Health Connect validates segment types against the session type and throws on
         // a mismatch; fall back to laps only, then to the plain session, so a workout always writes.
-        val laps = intervalLaps(splits, start, end)
+        // Fork (Rick): an indoor track run without intervals sends each timed lap instead.
+        val laps = if (splits.isEmpty() && trackLaps.isNotEmpty()) trackLapsToHc(trackLaps, start, end) else intervalLaps(splits, start, end)
         val segments = intervalSegments(splits, start, end, exerciseType)
         out.add(
             runCatching { session(segments, laps) }
@@ -499,6 +501,22 @@ object HealthConnectWriter {
             if (b.isAfter(end)) b = end
             if (!a.isBefore(b)) continue
             out.add(Triple(a, b, sp))
+            cursor = b
+        }
+        return out
+    }
+
+    /** Fork (Rick): indoor track laps (startMs, endMs, metres) clamped into the session, in order. */
+    private fun trackLapsToHc(laps: List<Triple<Long, Long, Double>>, start: Instant, end: Instant): List<ExerciseLap> {
+        val out = ArrayList<ExerciseLap>()
+        var cursor = start
+        for ((s0, s1, m) in laps.sortedBy { it.first }) {
+            var a = Instant.ofEpochMilli(s0)
+            var b = Instant.ofEpochMilli(s1)
+            if (a.isBefore(cursor)) a = cursor
+            if (b.isAfter(end)) b = end
+            if (!a.isBefore(b)) continue
+            out.add(ExerciseLap(startTime = a, endTime = b, length = Length.meters(m)))
             cursor = b
         }
         return out
@@ -559,12 +577,13 @@ object HealthConnectWriter {
         if (HealthConnectClient.getSdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) return WritebackResult.UNAVAILABLE
         // Fork (Rick): attach interval splits (segments + laps) and write active calories.
         val splits = com.noop.intervals.IntervalSplitStore.load(context, row.startTs)?.splits.orEmpty()
-        val recs = buildExerciseRecords(row, exerciseType, splits)
+        val trackLaps = com.noop.intervals.IndoorLapStore.timedLaps(context, row.startTs) // Fork: indoor laps
+        val recs = buildExerciseRecords(row, exerciseType, splits, trackLaps)
         val client = HealthConnectClient.getOrCreate(context)
         val result = runCatching { client.insertRecords(recs); recs.size }
             // If Health Connect rejects the segments/laps, write the plain workout rather than nothing.
             .recoverCatching {
-                if (splits.isEmpty()) throw it
+                if (splits.isEmpty() && trackLaps.isEmpty()) throw it
                 val plain = buildExerciseRecords(row, exerciseType)
                 client.insertRecords(plain); plain.size
             }

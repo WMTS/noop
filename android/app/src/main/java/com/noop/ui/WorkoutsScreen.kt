@@ -1683,6 +1683,8 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
             }
             // Fork: elevation gain, when it was recorded for this workout.
             WorkoutElevationSection(row.startTs) { CardDivider() }
+            // Fork: laps of an indoor track run.
+            IndoorLapsSection(row.startTs) { CardDivider() }
             // Fork: where this workout's distance, calories and zones came from.
             RunnerMethodNote(row) { CardDivider() }
 

@@ -162,7 +162,14 @@ internal fun RunnerMethodNote(row: com.noop.data.WorkoutRow, divider: @Composabl
     val reserve = remember(row.startTs) { RunnerHrStore.reserveZones(context) }
     val customZones = remember(row.startTs) { ProfileStore.from(context).hasCustomHrZones }
     val climb = remember(row.startTs) { ElevationStore.load(context, row.startTs) }
+    val laps = remember(row.startTs) { com.noop.intervals.IndoorLapStore.load(context, row.startTs) }
     val lines = buildList {
+        if (laps != null) {
+            add(
+                "Distance: ${laps.count} laps on ${laps.trackName.ifBlank { "the track" }} times its lap length " +
+                    "(${laps.lapMeters.toInt()} m), counted with the Lap button and confirmed when you ended. GPS was off.",
+            )
+        }
         if (method.gpsDistance) {
             add("Distance: the GPS route, with standing-still jitter smoothed out. The map shows the route as recorded.")
         }

@@ -41,6 +41,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.Icon
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.HrZones
 import com.noop.ble.StandardHrSource
@@ -173,6 +179,8 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
                 )
             }
 
+            // Fork: indoor track laps (big Lap button), when this is an indoor track run.
+            IndoorLapPanel(workoutStartMs = w.startMs, activeElapsedS = elapsedS.toLong())
             // Fork: interval timer attached to this workout (or a button to add one mid-run).
             IntervalRunPanel(workoutStartMs = w.startMs, workoutPaused = w.pausedAtMs != null)
             HrCapStatusLine(workoutStartMs = w.startMs)
@@ -220,21 +228,49 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
             // and the button stays reachable by scrolling when the content overflows.
             Spacer(Modifier.height(12.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            // Fork (Rick): two big, high-contrast buttons readable mid-run without glasses (bold white text and
+            // an icon on each). Delete moved off this row to a small link at the bottom of the screen.
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
+                val paused = w.pausedAtMs != null
                 Button(
-                    onClick = { vm.toggleWorkoutPause() }, modifier = Modifier.weight(1f),
+                    onClick = { vm.toggleWorkoutPause() }, modifier = Modifier.weight(1f).height(76.dp),
                     contentPadding = PaddingValues(vertical = 14.dp),
-                ) { Text(if (w.pausedAtMs != null) uiString(R.string.workout_action_resume) else uiString(R.string.workout_action_pause), style = NoopType.headline) }
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = androidx.compose.ui.graphics.Color.White),
+                ) {
+                    Icon(
+                        if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                        contentDescription = null, modifier = Modifier.size(30.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (paused) uiString(R.string.workout_action_resume) else uiString(R.string.workout_action_pause),
+                        fontSize = 24.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        color = androidx.compose.ui.graphics.Color.White,
+                    )
+                }
                 Button(
-                    onClick = { showDeleteConfirm = true }, modifier = Modifier.weight(1f),
+                    onClick = { showEndConfirm = true }, modifier = Modifier.weight(1f).height(76.dp),
                     contentPadding = PaddingValues(vertical = 14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Palette.statusCritical),
-                ) { Text(uiString(R.string.workout_action_delete), style = NoopType.headline) }
-                Button(
-                    onClick = { showEndConfirm = true }, modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(vertical = 14.dp),
-                ) { Text(uiString(R.string.workout_action_end), style = NoopType.headline) }
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = androidx.compose.ui.graphics.Color.White),
+                ) {
+                    Icon(
+                        Icons.Filled.Stop,
+                        contentDescription = null, modifier = Modifier.size(30.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        uiString(R.string.workout_action_end),
+                        fontSize = 24.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        color = androidx.compose.ui.graphics.Color.White,
+                    )
+                }
             }
+            // Fork (Rick): Delete is a quiet link well below the main buttons, and it always asks first.
+            Spacer(Modifier.height(40.dp))
+            TextButton(
+                onClick = { showDeleteConfirm = true },
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) { Text("Delete workout", style = NoopType.subhead, color = Palette.textTertiary) }
         }
     }
 
@@ -251,10 +287,14 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
                 )
             },
             text = {
-                Text(
-                    uiString(R.string.l10n_live_workout_screen_this_stops_recording_and_saves_what_3e17a23e),
-                    style = NoopType.subhead, color = Palette.textSecondary,
-                )
+                Column {
+                    Text(
+                        uiString(R.string.l10n_live_workout_screen_this_stops_recording_and_saves_what_3e17a23e),
+                        style = NoopType.subhead, color = Palette.textSecondary,
+                    )
+                    // Fork: on an indoor track run, confirm or fix the lap count before saving.
+                    IndoorEndAdjust(workoutStartMs = w.startMs)
+                }
             },
             confirmButton = {
                 TextButton(onClick = { showEndConfirm = false; vm.endWorkout(); onClose() }) {
@@ -279,16 +319,24 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             containerColor = Palette.surfaceOverlay,
-            title = { Text(uiString(R.string.workout_delete_title), style = NoopType.title2, color = Palette.textPrimary) },
-            text = { Text(uiString(R.string.workout_delete_message), style = NoopType.subhead, color = Palette.textSecondary) },
+            // Fork (Rick): plain question, and the big safe button ("Keep going") sits where a repeat tap lands;
+            // the small red Delete is on the other side.
+            title = { Text("Are you sure you want to delete your progress?", style = NoopType.title2, color = Palette.textPrimary) },
+            text = {
+                Text(
+                    "This stops recording and permanently deletes this workout, including its heart rate, distance, laps and splits. It cannot be undone.",
+                    style = NoopType.subhead, color = Palette.textSecondary,
+                )
+            },
             confirmButton = {
-                TextButton(onClick = { showDeleteConfirm = false; vm.discardWorkout(); onClose() }) {
-                    Text(uiString(R.string.workout_action_delete), style = NoopType.body, color = Palette.statusCritical)
-                }
+                Button(
+                    onClick = { showDeleteConfirm = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent, contentColor = androidx.compose.ui.graphics.Color.White),
+                ) { Text("Keep going", style = NoopType.headline, color = androidx.compose.ui.graphics.Color.White) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text(uiString(R.string.l10n_live_workout_screen_cancel_77dfd213), style = NoopType.body, color = Palette.textSecondary)
+                TextButton(onClick = { showDeleteConfirm = false; vm.discardWorkout(); onClose() }) {
+                    Text(uiString(R.string.workout_action_delete), style = NoopType.body, color = Palette.statusCritical)
                 }
             },
         )

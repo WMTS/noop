@@ -373,6 +373,11 @@
             android:name="com.noop.alarm.WindDownReceiver"
             android:exported="false" />
 
+        <!-- Fork (Rick): the Lap button in the indoor track notification. Not exported. -->
+        <receiver
+            android:name="com.noop.intervals.LapActionReceiver"
+            android:exported="false" />
+
         <!-- Shares the strap log (a cache file) for bug reports. Not exported; read access is granted
              per-share via FLAG_GRANT_READ_URI_PERMISSION. Authority is applicationId-scoped so the
              full + demo flavors don't collide. -->

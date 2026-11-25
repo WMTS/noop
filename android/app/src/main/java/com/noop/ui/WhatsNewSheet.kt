@@ -179,7 +179,7 @@ private fun ReleaseCard(release: AppChangelog.Release, isLatest: Boolean = false
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SourceBadge("v${release.version}")
+                SourceBadge(if (release.version.startsWith("Runner")) release.version else "v${release.version}") // Fork
                 Text(
                     release.title,
                     style = NoopType.headline,

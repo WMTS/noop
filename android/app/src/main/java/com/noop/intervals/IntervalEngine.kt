@@ -256,8 +256,16 @@ object IntervalEngine {
         if (hr > hrMax) hrMax = hr
     }
 
+    /** Distance so far for the linked workout: GPS, or laps on an indoor track (part lap estimated). */
+    private fun currentDistanceM(): Double? {
+        val gps = GpsSession.state.value
+        if (gps.active) return gps.distanceM
+        if (IndoorLapSession.state.value.active) return IndoorLapSession.estimatedMeters()
+        return null
+    }
+
     private fun resetStepAccumulators() {
-        stepStartDistanceM = GpsSession.state.value.distanceM
+        stepStartDistanceM = currentDistanceM() ?: 0.0
         stepStartWallMs = System.currentTimeMillis()
         hrSum = 0L
         hrCount = 0
@@ -265,9 +273,9 @@ object IntervalEngine {
     }
 
     private fun buildSplit(index: Int, step: TimelineStep, durationS: Int): IntervalSplit {
-        val gps = GpsSession.state.value
-        val dist = if (gps.active && _state.value.linkedWorkoutStartMs != null) {
-            (gps.distanceM - stepStartDistanceM).coerceAtLeast(0.0)
+        val now = currentDistanceM()
+        val dist = if (now != null && _state.value.linkedWorkoutStartMs != null) {
+            (now - stepStartDistanceM).coerceAtLeast(0.0)
         } else {
             null
         }

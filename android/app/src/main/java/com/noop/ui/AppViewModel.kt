@@ -1621,6 +1621,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         intervalProgram: com.noop.intervals.IntervalProgram? = null,
         hrCapZone: Int = 0,
         shoeId: String? = null,
+        indoorTrack: com.noop.intervals.IndoorTrack? = null,
     ) {
         if (_activeWorkout.value != null) return
         _lastWorkout.value = null
@@ -1658,6 +1659,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // Fork: zones follow the latest resting / max HR; record elevation gain on GPS workouts.
         com.noop.intervals.RunnerHrSync.sync(appContext, profileStore)
         if (gpsEnabled) com.noop.intervals.ElevationTracker.start(appContext)
+        // Fork: indoor track mode counts laps instead of GPS.
+        if (!gpsEnabled && indoorTrack != null) com.noop.intervals.IndoorLapSession.start(appContext, startMs, indoorTrack)
         // Fork: heart-rate ceiling alert ("stay in Zone N or below").
         if (hrCapZone > 0 || com.noop.intervals.HrCapPrefs.targetAvg(appContext) > 0) {
             com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
@@ -1787,6 +1790,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (intervalsLinkedTo(w)) com.noop.intervals.IntervalEngine.stop(saveSplits = false)
         stopHrGuardFor(w)
         com.noop.intervals.ElevationTracker.stop() // Fork
+        com.noop.intervals.IndoorLapSession.discard(appContext) // Fork
         releaseRealtimeHr()
         com.noop.intervals.ShoeStore.unassign(appContext, w.startMs / 1000)
         _activeWorkout.value = null
@@ -1821,7 +1825,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // ViewModel was cleared mid-ride (screen off), so [w.track] may be stale. Stop it and take its
         // final track. A non-GPS workout has nothing in the session, so fall back to the local track. (#215)
         val track = if (w.gpsEnabled) GpsSession.stop() else w.track
-        val distanceM = if (w.gpsEnabled) com.noop.intervals.RunDistance.meters(track) else w.distanceM // Fork: smoothed
+        // Fork: GPS distance is smoothed; an indoor track run's distance is its laps x lap length.
+        val distanceM = if (w.gpsEnabled) com.noop.intervals.RunDistance.meters(track)
+            else com.noop.intervals.IndoorLapSession.finish(appContext, w.startMs) ?: w.distanceM
         // If we promoted the foreground service ONLY to keep GPS tracking alive (the user hasn't opted
         // into the background connection), drop it now the route is finished — otherwise a lingering
         // "Connected" notification would outlive the workout. With background-connection on, leave it
