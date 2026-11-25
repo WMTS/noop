@@ -145,7 +145,7 @@ object HrZoneGuard {
                 delay(1000)
                 if (_state.value.paused) continue
                 val ble = runCatching { (ctx as NoopApplication).ble }.getOrNull() ?: continue
-                val hr = ble.state.value.heartRate ?: continue
+                val hr = WorkoutStrap.bpmOr(ble.state.value.heartRate) ?: continue // chest strap first when connected
                 if (hr > 0) { sum += hr; count++ }
                 activeSeconds++
                 val avg = if (count > 0) (sum / count).toInt() else 0

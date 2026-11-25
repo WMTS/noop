@@ -206,13 +206,14 @@ object MaxHrScan {
  * the note would no longer be true. SharedPreferences "runner_method".
  */
 object RunMethodStore {
-    data class Method(val calories: String?, val gpsDistance: Boolean)
+    data class Method(val calories: String?, val gpsDistance: Boolean, val hrSource: String? = null)
 
     private fun p(ctx: Context) = ctx.applicationContext.getSharedPreferences("runner_method", Context.MODE_PRIVATE)
 
-    fun save(ctx: Context, startTs: Long, calories: String?, gpsDistance: Boolean) {
+    fun save(ctx: Context, startTs: Long, calories: String?, gpsDistance: Boolean, hrSource: String? = null) {
         val o = JSONObject().put("gps", gpsDistance)
         if (calories != null) o.put("calories", calories)
+        if (hrSource != null) o.put("hrSource", hrSource)
         p(ctx).edit().putString(startTs.toString(), o.toString()).apply()
     }
 
@@ -220,7 +221,10 @@ object RunMethodStore {
         val s = p(ctx).getString(startTs.toString(), null) ?: return null
         return runCatching {
             val o = JSONObject(s)
-            Method(if (o.has("calories")) o.getString("calories") else null, o.optBoolean("gps"))
+            Method(
+                if (o.has("calories")) o.getString("calories") else null, o.optBoolean("gps"),
+                if (o.has("hrSource")) o.getString("hrSource") else null,
+            )
         }.getOrNull()
     }
 

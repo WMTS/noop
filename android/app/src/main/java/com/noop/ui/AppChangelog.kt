@@ -40,13 +40,17 @@ object AppChangelog {
         // Fork (Rick): what NOOP Runner adds, and how its numbers are worked out. Not a version bump, so the
         // sheet does not pop up by itself; it sits at the top of Settings > What's new.
         Release(
-            version = "Runner build 9",
+            version = "Runner build 10",
             title = "NOOP Runner: running features and how they are calculated",
             date = "November 2026",
             items = listOf(
                 "Interval timer. Warm-up, work and rest blocks, rounds, sets and cool-down, with saved programs and presets (Tabata, HIIT, run/walk 4:1, 6:1, 8:1, pyramid). Pick repetitions when you start (∞ repeats until you stop). Voice, beeps, a 3-2-1 countdown, phone vibration and a strap buzz call each change, and it keeps running with the screen off. More > Intervals.",
                 "Run with intervals. Attach a program when you start a workout or mid-run. Each step's time, distance, pace and average and max heart rate are saved and shown on the workout.",
                 "Indoor track mode. For runs and walks, choose Outdoor (GPS) or Indoor track when you start. Indoor turns GPS off; save your track once as laps per mile (or metres per lap), tap the big Lap button each time you pass your start line (it is in your notifications too, for the lock screen), and fix the lap count when you end. Distance is laps x lap length, and it feeds pace, calories, shoe miles, splits and Health Connect, which also gets each timed lap. A tap within 10 seconds of the last lap is ignored as a double tap; an interval step that ends mid-lap gets its part lap estimated from time.",
+                "Strava. Settings > Strava connects your own Strava account: paste the Client ID and Client Secret of a Strava API app (yours, or a friend's that allows 10 athletes; Strava requires a subscription for whoever creates it), tap Connect and approve. Workouts then upload when you press End, as a TCX file with heart rate, laps and the route, and an upload that fails for lack of signal retries later. Choose which workout types go, and whether to keep them off followers' feeds; Strava does not let apps make an activity private, so your Strava privacy setting applies. Keys and sign-in stay encrypted on your phone and carry over through updates.",
+                "Send to Strava and Export TCX. Every saved workout has both buttons, so older runs can go too, and the TCX file also works with Strava's website upload, Garmin Connect and others.",
+                "Chest strap for workouts. Pair any Bluetooth chest strap (Polar H10, H9, H7, Verity Sense, Garmin HRM, Wahoo TICKR and others) in Devices, pick it in Settings > Chest strap for workouts, and it connects only during workouts while your WHOOP stays connected for sleep and recovery. While the strap is sending, the workout's heart rate, HR alert and interval splits use it; if it drops out for 5 seconds the WHOOP takes over. Test connection checks it before a run.",
+                "Set up NOOP Runner. New users see a short checklist on Today (profile, shoes, heart rate, indoor track, Strava, chest strap) until it is done or hidden.",
                 "Easier buttons mid-run. Pause and End are bigger, with bold white text and an icon each. Delete is a small link at the bottom of the screen and always asks 'Are you sure you want to delete your progress?', with Keep going as the big button.",
                 "Heart-rate alert. Set a stay-below ceiling (a bpm or the top of a zone) and a target average; you are told when you go over and hear your average every 10 minutes. Start a workout > HR alert.",
                 "Calories from distance. Runs and walks with a distance are costed with the ACSM running and walking equations: about 1 kcal per kg per km running and half that walking, whatever the pace. With intervals, each step is costed as a run or a walk, so walk breaks are not counted at running cost. Climbing adds ACSM's grade term (0.9 ml/kg per metre climbed running, 1.8 walking); descents are not credited. Workouts without a distance use heart rate (Keytel).",
@@ -58,7 +62,7 @@ object AppChangelog {
                 "Health Connect. Workouts share their interval segments or track laps, and active calories, as well as distance and heart rate. GPS routes are not shared.",
                 "Indigo theme and a runner's Today. An Indigo preset with a ribbed dark backdrop and hex entry for any accent; Today has a Start workout card, and the finished workout opens when you press End.",
                 "Each workout says how it was worked out. Workouts recorded in NOOP Runner list where their distance, calories and zones came from, in a How these numbers were worked out section.",
-                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.9), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
+                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.10), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
             ),
         ),
         Release(

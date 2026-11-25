@@ -249,7 +249,7 @@ object IntervalEngine {
 
     private fun sampleHeartRate() {
         val ctx = appCtx ?: return
-        val hr = runCatching { (ctx as NoopApplication).ble.state.value.heartRate }.getOrNull() ?: return
+        val hr = WorkoutStrap.bpmOr(runCatching { (ctx as NoopApplication).ble.state.value.heartRate }.getOrNull()) ?: return
         if (hr <= 0 || _state.value.paused) return
         hrSum += hr
         hrCount += 1

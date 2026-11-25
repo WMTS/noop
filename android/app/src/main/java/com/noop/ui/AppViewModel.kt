@@ -912,6 +912,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // Fork: resting HR for heart-rate reserve zones, and workout peaks for the max HR suggestion.
         viewModelScope.launch { com.noop.intervals.RunnerHrSync.startup(appContext, profileStore, recentDays) }
         forkScanPeaks(delayMs = 20_000)
+        forkStravaRetry() // Fork: send any Strava uploads that failed for lack of signal
         // #1121: re-arm the opt-in detailed-capture rolling log on launch, so a capture the user started
         // keeps going across the process being killed (this phone class is not battery-exempt and Android
         // kills the background BLE overnight — the very window a battery capture needs to span).
@@ -1528,8 +1529,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // MARK: - HR smoothing (median filter)
 
-    private fun ingestHr(raw: Int) {
+    private fun ingestHr(raw: Int, fromWorkoutStrap: Boolean = false) {
         if (raw <= 0) return
+        // Fork: while a chest strap feeds the workout, its readings replace the WHOOP's.
+        if (!fromWorkoutStrap && com.noop.intervals.WorkoutStrap.feedingWorkout()) return
         hrWindow.addLast(raw)
         while (hrWindow.size > hrWindowSize) hrWindow.removeFirst()
         val sorted = hrWindow.sorted()
@@ -1661,6 +1664,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (gpsEnabled) com.noop.intervals.ElevationTracker.start(appContext)
         // Fork: indoor track mode counts laps instead of GPS.
         if (!gpsEnabled && indoorTrack != null) com.noop.intervals.IndoorLapSession.start(appContext, startMs, indoorTrack)
+        // Fork: connect the chosen chest strap for this workout (the WHOOP stays connected).
+        com.noop.intervals.WorkoutStrap.startForWorkout(appContext) { ingestHr(it, fromWorkoutStrap = true) }
         // Fork: heart-rate ceiling alert ("stay in Zone N or below").
         if (hrCapZone > 0 || com.noop.intervals.HrCapPrefs.targetAvg(appContext) > 0) {
             com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
@@ -1677,6 +1682,65 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     workouts = { from, to -> repository.workoutsUnion(deviceId, from, to) },
                     hr = { r -> repository.hrSamplesUnion(deviceId, r.startTs, r.endTs) },
                 )
+            }
+        }
+    }
+
+    /** Fork: the saved heart rate for a workout's window (for Strava and TCX export). */
+    private suspend fun forkHr(row: WorkoutRow): List<HrSample> =
+        runCatching { repository.hrSamplesUnion(deviceId, row.startTs, row.endTs) }.getOrDefault(emptyList())
+
+    /** Fork: upload a just-saved workout to Strava when this phone is set to. */
+    private fun forkStravaAuto(row: WorkoutRow) {
+        if (!com.noop.intervals.StravaSync.wantsAuto(appContext, row)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            delay(3_000) // let the workout's heart rate land first
+            runCatching { com.noop.intervals.StravaSync.upload(appContext, row, forkHr(row)) }
+        }
+    }
+
+    /** Fork: retry Strava uploads that failed for lack of a connection. */
+    private fun forkStravaRetry() {
+        viewModelScope.launch(Dispatchers.IO) {
+            delay(30_000)
+            for (ts in com.noop.intervals.StravaStore.pending(appContext)) {
+                val row = runCatching { repository.workoutsUnion(deviceId, ts - 1, ts + 1) }.getOrNull()
+                    ?.firstOrNull { it.startTs == ts } ?: continue
+                runCatching { com.noop.intervals.StravaSync.upload(appContext, row, forkHr(row)) }
+            }
+        }
+    }
+
+    /** Fork: "Send to Strava" on a saved workout. */
+    fun forkSendToStrava(row: WorkoutRow, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val msg = withContext(Dispatchers.IO) {
+                runCatching { com.noop.intervals.StravaSync.upload(appContext, row, forkHr(row)) }
+                    .getOrElse { "Upload failed: ${it.message}" }
+            }
+            onResult(msg)
+        }
+    }
+
+    /** Fork: "Export TCX" on a saved workout (heart rate, laps, route) through the share sheet. */
+    fun forkExportWorkout(context: android.content.Context, row: WorkoutRow) {
+        viewModelScope.launch {
+            runCatching {
+                val file = withContext(Dispatchers.IO) {
+                    val tcx = com.noop.intervals.StravaSync.buildTcx(appContext, row, forkHr(row))
+                    java.io.File(java.io.File(appContext.cacheDir, "exports").apply { mkdirs() }, "noop-runner-${row.startTs}.tcx")
+                        .apply { writeText(tcx) }
+                }
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "application/vnd.garmin.tcx+xml"
+                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    putExtra(android.content.Intent.EXTRA_SUBJECT, "NOOP Runner workout")
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(android.content.Intent.createChooser(send, "Export workout"))
+            }.onFailure {
+                android.widget.Toast.makeText(context, "Couldn't export: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1791,6 +1855,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         stopHrGuardFor(w)
         com.noop.intervals.ElevationTracker.stop() // Fork
         com.noop.intervals.IndoorLapSession.discard(appContext) // Fork
+        com.noop.intervals.WorkoutStrap.stop() // Fork
         releaseRealtimeHr()
         com.noop.intervals.ShoeStore.unassign(appContext, w.startMs / 1000)
         _activeWorkout.value = null
@@ -1815,6 +1880,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         stopHrGuardFor(w)
         val forkClimb = com.noop.intervals.ElevationTracker.stop() // Fork: elevation gain, saved with the row below
+        val forkStrapUsed = com.noop.intervals.WorkoutStrap.stop() // Fork: did the chest strap supply heart rate?
         releaseRealtimeHr()
         _activeWorkout.value = null
         gpsJob?.cancel(); gpsJob = null
@@ -1919,6 +1985,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             appContext, row.startTs,
             calories = forkFoot?.method ?: if (energyKcal != null) "hr" else null,
             gpsDistance = w.gpsEnabled && track.size >= 2,
+            hrSource = if (forkStrapUsed) com.noop.intervals.WorkoutStrap.selectedName(appContext).ifBlank { "chest strap" } else null,
         )
         // Workouts & GPS test mode: one session-end summary tagged .workouts (the lastSessionSummary readout
         // source) carrying the captured HR window size, the duration, and the accepted GPS point count (the
@@ -1945,6 +2012,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // Fork: show the finished workout's detail (after its row + HR are stored, so it is complete).
             if (saved) _finishedWorkout.value = row
             if (saved) forkScanPeaks()
+            if (saved) forkStravaAuto(row) // Fork: Strava upload, when this phone is set to
             if (_hcWriteback.value) {
                 runCatching { HealthConnectWriter.writeExercise(appContext, row, w.sport.exerciseType) }
                 // #528: export the just-captured HR series now (workout row already upserted above, so

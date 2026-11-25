@@ -29,6 +29,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 internal fun StartWorkoutEntryCard(onOpen: () -> Unit) {
     val context = LocalContext.current
     val shoe = com.noop.intervals.ShoeStore.find(context, com.noop.intervals.ShoeStore.defaultId(context))
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // One-time setup checklist for a new NOOP Runner user (hidden once done or dismissed).
+    RunnerSetupChecklist()
     NoopCard(
         tint = Palette.accent,
         modifier = Modifier.clickable(onClick = onOpen),
@@ -47,7 +50,7 @@ internal fun StartWorkoutEntryCard(onOpen: () -> Unit) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Start workout", style = NoopType.headline, color = Palette.textPrimary)
                 Text(
-                    "Pick a sport, intervals, HR alert" + (shoe?.let { " and shoes (${it.name})" } ?: " and shoes"),
+                    "Outdoor or indoor track, intervals, HR alert" + (shoe?.let { " and shoes (${it.name})" } ?: " and shoes"),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -59,6 +62,7 @@ internal fun StartWorkoutEntryCard(onOpen: () -> Unit) {
                 modifier = Modifier.size(20.dp),
             )
         }
+    }
     }
 }
 

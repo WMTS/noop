@@ -107,7 +107,9 @@ private enum class PrimerSection(
             "of your max heart rate, or, if you turn it on in Settings > Runner heart rate, of your heart-rate " +
             "reserve (resting to max, using your strap's 7-day resting heart rate). Max heart rate is the age " +
             "formula (208 - 0.7 x age) until you set one, and NOOP Runner suggests one from the highest heart " +
-            "rate you held for 15 seconds in a workout. Each recorded workout lists how its numbers were worked out.",
+            "rate you held for 15 seconds in a workout. With a chest strap chosen in Settings, workout heart rate " +
+            "comes from the strap while it is connected and from the WHOOP otherwise. Strava uploads send the same " +
+            "heart rate, laps and route as a TCX file. Each recorded workout lists how its numbers were worked out.",
         icon = Icons.AutoMirrored.Filled.DirectionsRun,
     ),
     RECORDING(

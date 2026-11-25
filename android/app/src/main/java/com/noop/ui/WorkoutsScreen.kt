@@ -1687,6 +1687,8 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
             IndoorLapsSection(row.startTs) { CardDivider() }
             // Fork: where this workout's distance, calories and zones came from.
             RunnerMethodNote(row) { CardDivider() }
+            // Fork: Strava status, Send to Strava and Export TCX.
+            StravaWorkoutSection(vm, row) { CardDivider() }
 
             // Export the recorded GPS route as a GPX/FIT file (Strava / Garmin Connect / any GPS app).
             // Only when a route with a drawable path was recorded; the file is built on-device and shared.

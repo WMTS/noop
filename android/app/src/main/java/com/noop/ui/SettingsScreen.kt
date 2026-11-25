@@ -1299,6 +1299,9 @@ fun SettingsScreen(
         ShoesSettingsCard()
         // Fork (Rick): heart-rate reserve zones and max HR from workouts.
         RunnerHrSettingsCard(vm, rev) { rev++ }
+        // Fork (Rick): Strava upload and a chest strap for workouts, set up per phone.
+        StravaSettingsCard()
+        ChestStrapSettingsCard(vm)
 
         // --- Daily cycle ---
         SettingsCard(

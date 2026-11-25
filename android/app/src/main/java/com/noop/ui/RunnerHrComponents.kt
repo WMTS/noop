@@ -182,6 +182,7 @@ internal fun RunnerMethodNote(row: com.noop.data.WorkoutRow, divider: @Composabl
             )
             "hr" -> add("Calories: estimated from heart rate (Keytel equation), because this workout had no distance to go on.")
         }
+        method.hrSource?.let { add("Heart rate: from your chest strap ($it) while it was connected, the WHOOP otherwise.") }
         add(runnerZoneSentence(reserve, customZones))
     }
     divider()

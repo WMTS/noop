@@ -373,6 +373,21 @@
             android:name="com.noop.alarm.WindDownReceiver"
             android:exported="false" />
 
+        <!-- Fork (Rick): receives Strava's sign-in redirect (noop-runner://localhost/strava?code=...). -->
+        <activity
+            android:name="com.noop.intervals.StravaAuthActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="noop-runner" android:host="localhost" />
+            </intent-filter>
+        </activity>
+
         <!-- Fork (Rick): the Lap button in the indoor track notification. Not exported. -->
         <receiver
             android:name="com.noop.intervals.LapActionReceiver"
