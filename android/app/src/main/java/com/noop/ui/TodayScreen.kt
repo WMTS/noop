@@ -7977,24 +7977,29 @@ private fun RunnerChargeScale(score: Double?) {
         score < 88 -> 3
         else -> 4
     }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = Metrics.gap, end = Metrics.gap, bottom = Metrics.space16),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        words.forEachIndexed { i, res ->
-            if (i > 0) {
-                Text("·", style = NoopType.footnote, color = Palette.textTertiary, modifier = Modifier.padding(horizontal = 5.dp))
+    // Larger type on wide screens (foldables, big phones); a step smaller on narrow ones so the row fits.
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(start = Metrics.gap, end = Metrics.gap, bottom = Metrics.space16)) {
+        val wide = maxWidth >= 400.dp
+        val onStyle = NoopType.title2.copy(fontSize = if (wide) 26.sp else 21.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+        val offStyle = NoopType.body.copy(fontSize = if (wide) 15.sp else 12.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            words.forEachIndexed { i, res ->
+                if (i > 0) {
+                    Text("·", style = offStyle, color = Palette.textTertiary, modifier = Modifier.padding(horizontal = if (wide) 7.dp else 4.dp))
+                }
+                val on = i == active
+                Text(
+                    uiString(res).uppercase(),
+                    style = if (on) onStyle else offStyle,
+                    color = if (on) runnerSynthesisColor(score) else Palette.textTertiary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
-            val on = i == active
-            Text(
-                uiString(res).uppercase(),
-                style = if (on) NoopType.headline else NoopType.footnote,
-                color = if (on) runnerSynthesisColor(score) else Palette.textTertiary,
-                fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.Bold else null,
-                maxLines = 1,
-                softWrap = false,
-            )
         }
     }
 }

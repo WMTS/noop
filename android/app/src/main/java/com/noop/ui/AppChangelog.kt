@@ -40,7 +40,7 @@ object AppChangelog {
         // Fork (Rick): what NOOP Runner adds, and how its numbers are worked out. Not a version bump, so the
         // sheet does not pop up by itself; it sits at the top of Settings > What's new.
         Release(
-            version = "Runner build 17",
+            version = "Runner build 18",
             title = "NOOP Runner: running features and how they are calculated",
             date = "November 2026",
             items = listOf(
@@ -66,7 +66,7 @@ object AppChangelog {
                 "Health Connect. Workouts share their interval segments or track laps, and active calories, as well as distance and heart rate. GPS routes are not shared.",
                 "Indigo theme and a runner's Today. An Indigo preset with a ribbed dark backdrop and hex entry for any accent; Today has a Start workout card, and the finished workout opens when you press End.",
                 "Each workout says how it was worked out. Workouts recorded in NOOP Runner list where their distance, calories and zones came from, in a How these numbers were worked out section.",
-                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.17), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
+                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.18), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
             ),
         ),
         Release(
