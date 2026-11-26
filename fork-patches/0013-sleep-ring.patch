@@ -1,0 +1,218 @@
+diff --git a/android/app/src/main/java/com/noop/ui/AppChangelog.kt b/android/app/src/main/java/com/noop/ui/AppChangelog.kt
+index 21fd95a..d147bab 100644
+--- a/android/app/src/main/java/com/noop/ui/AppChangelog.kt
++++ b/android/app/src/main/java/com/noop/ui/AppChangelog.kt
+@@ -40,7 +40,7 @@ object AppChangelog {
+         // Fork (Rick): what NOOP Runner adds, and how its numbers are worked out. Not a version bump, so the
+         // sheet does not pop up by itself; it sits at the top of Settings > What's new.
+         Release(
+-            version = "Runner build 12",
++            version = "Runner build 13",
+             title = "NOOP Runner: running features and how they are calculated",
+             date = "November 2026",
+             items = listOf(
+@@ -53,7 +53,7 @@ object AppChangelog {
+                 "Set up NOOP Runner. New users see a short checklist on Today (profile, shoes, heart rate, indoor track, Strava, chest strap) until it is done or hidden.",
+                 "Easier buttons mid-run. Pause and End are bigger, with bold white text and an icon each. Delete is a small link at the bottom of the screen and always asks 'Are you sure you want to delete your progress?', with Keep going as the big button.",
+                 "Heart-rate alert. Set a ceiling (stay below a bpm or the top of a zone), a floor (stay above a bpm or the bottom of a zone), or both for a range; Stay in zone sets both from one zone. Over the ceiling for 15 seconds you hear Slow down with two short buzzes; under the floor for 30 seconds you hear Pick it up with one long buzz, and it repeats at most once a minute. The floor stays quiet for the warm-up (5 minutes, adjustable), during interval rest and walk steps and while paused. Each workout shows its time in range, above and below. A target average is read out every 10 minutes. Start a workout > HR alert.",
+-                "Rest that matches your night. Tap Rest on Today to see the score broken into its parts, last night's bed and wake times, light, deep and REM with typical ranges, time awake, wake-ups, time to fall asleep, lowest heart rate and HRV, and a note when something looks off (like REM over 30%); History keeps the trend. Nights scored on your phone now count wake-ups: Rest is duration 40 (against 8 hours), efficiency 20, deep and REM 20, consistency 10 and disturbances 10 (full marks up to 2 wake-ups, 12.5 points off for each one after). Imported nights keep the original formula. With a WHOOP 5.0 or MG, the night now ends when you start walking and your heart rate does not settle back to sleeping levels, so sitting quietly after getting up is no longer counted as sleep.",
++                "Sleep score that matches your night. The third ring on Today is now called Sleep (it is the same score NOOP calls Rest) and shows the hours you slept under it. Tap it to open the Sleep tab, which now shows how the score adds up, light, deep and REM with typical ranges, wake-ups, time to fall asleep, lowest heart rate, HRV and breathing rate, and a note when something looks off (like REM over 30%). Nights scored on your phone now count wake-ups: the score is duration 40 (against 8 hours), efficiency 20, deep and REM 20, consistency 10 and disturbances 10 (full marks up to 2 wake-ups, 12.5 points off for each one after). Imported nights keep the original formula. With a WHOOP 5.0 or MG, the night now ends when you start walking and your heart rate does not settle back to sleeping levels, so sitting quietly after getting up is no longer counted as sleep.",
+                 "Calories from distance. Runs and walks with a distance are costed with the ACSM running and walking equations: about 1 kcal per kg per km running and half that walking, whatever the pace. With intervals, each step is costed as a run or a walk, so walk breaks are not counted at running cost. Climbing adds ACSM's grade term (0.9 ml/kg per metre climbed running, 1.8 walking); descents are not credited. Workouts without a distance use heart rate (Keytel).",
+                 "Elevation gain. GPS workouts record how much you climbed, from the phone's barometer when it has one, otherwise from GPS altitude. Readings are smoothed and a climb only counts once it rises past a small threshold (2 m barometer, 5 m GPS), so sensor noise on flat ground adds nothing. Shown on the workout and used for calories.",
+                 "Smoother GPS distance. Each GPS fix is averaged with the two before it, and distance only builds once you have moved 4 m from the last counted point. Standing at a light or walking a break no longer adds distance from GPS wobble, which keeps distance, pace, splits, calories and shoe miles honest. The route map is left as recorded.",
+@@ -63,7 +63,7 @@ object AppChangelog {
+                 "Health Connect. Workouts share their interval segments or track laps, and active calories, as well as distance and heart rate. GPS routes are not shared.",
+                 "Indigo theme and a runner's Today. An Indigo preset with a ribbed dark backdrop and hex entry for any accent; Today has a Start workout card, and the finished workout opens when you press End.",
+                 "Each workout says how it was worked out. Workouts recorded in NOOP Runner list where their distance, calories and zones came from, in a How these numbers were worked out section.",
+-                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.12), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
++                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.13), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
+             ),
+         ),
+         Release(
+diff --git a/android/app/src/main/java/com/noop/ui/AppRoot.kt b/android/app/src/main/java/com/noop/ui/AppRoot.kt
+index e026af4..eccc093 100644
+--- a/android/app/src/main/java/com/noop/ui/AppRoot.kt
++++ b/android/app/src/main/java/com/noop/ui/AppRoot.kt
+@@ -648,7 +648,11 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
+                         onOpenHealth = { nav.navigate(Destination.Health.route) },
+                         // Every metric/vital card opens its OWN focused detail trend (vital_detail/<key>),
+                         // not the shared Health hub (2026-07-03). Mirrors the iOS liquidCard metricDetail.
+-                        onOpenMetric = { key -> nav.navigate("vital_detail/$key") },
++                        // Fork (Rick): the Sleep (Rest) ring and card open the Sleep tab, which shows last night in detail.
++                        onOpenMetric = { key ->
++                            if (key == HERO_REST_METRIC_KEY) nav.navigateTopLevel(Destination.Sleep.route)
++                            else nav.navigate("vital_detail/$key")
++                        },
+                         // A blank, uncalibrated WHOOP 4.0 Steps tile opens the same calibration screen as
+                         // Settings. A normal push returns Back to Today (#1515).
+                         onOpenStepsCalibration = { nav.navigate(Destination.StepsCalibration.route) },
+diff --git a/android/app/src/main/java/com/noop/ui/HowNoopWorksScreen.kt b/android/app/src/main/java/com/noop/ui/HowNoopWorksScreen.kt
+index 370c1ef..7f733d7 100644
+--- a/android/app/src/main/java/com/noop/ui/HowNoopWorksScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/HowNoopWorksScreen.kt
+@@ -76,7 +76,7 @@ private enum class PrimerSection(
+     ),
+     SCORES(
+         title = uiString(R.string.l10n_how_noop_works_screen_how_your_scores_work_21a0e2be),
+-        body = "Charge, Effort and Rest are scored on your own device from your strap data. " +
++        body = "Charge, Effort and Sleep (the Rest score in some screens) are scored on your own device from your strap data. " +
+             "Charge needs about four nights of sleep to learn your baseline (that's \"Calibrating\", " +
+             "counted as nights of 4 on the ring), and keeps sharpening over your first couple of weeks. " +
+             "On a WHOOP 5 or MG the strap banks little history, so that count can sit at 0 of 4 until you " +
+diff --git a/android/app/src/main/java/com/noop/ui/RunnerRestScreen.kt b/android/app/src/main/java/com/noop/ui/RunnerRestScreen.kt
+index bd32b00..d404cbc 100644
+--- a/android/app/src/main/java/com/noop/ui/RunnerRestScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/RunnerRestScreen.kt
+@@ -38,7 +38,8 @@ import java.text.DateFormat
+ import java.util.Date
+ import kotlin.math.roundToInt
+ 
+-// Fork addition (Rick): what tapping the Rest ring opens. Last night's score broken into its parts, the
++// Fork addition (Rick): last night's sleep in detail. The cards sit on the Sleep tab under the score (which
++// the Sleep ring on Today opens); RunnerRestScreen keeps them for any other link to the Rest detail. Last night's score broken into its parts, the
+ // night's numbers (times, stages with typical ranges, wake-ups, heart rate), plain flags when something
+ // looks off, and a History tab with NOOP's original Rest trend.
+ 
+@@ -73,14 +74,35 @@ internal fun RunnerRestScreen(vm: AppViewModel, onOpenSleep: () -> Unit) {
+ @Composable
+ private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
+     val days by vm.recentDays.collectAsStateWithLifecycle()
+-    val night = remember(days) { days.filter { (it.totalSleepMin ?: 0.0) > 0 }.maxByOrNull { it.day } }
++    val latest = remember(days) { days.filter { (it.totalSleepMin ?: 0.0) > 0 }.maxByOrNull { it.day }?.day }
++    Column(
++        verticalArrangement = Arrangement.spacedBy(12.dp),
++        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
++    ) {
++        RunnerNightCards(vm, latest, showScore = true)
++        Button(onClick = onOpenSleep, modifier = Modifier.fillMaxWidth()) { Text("Open the Sleep tab (timeline and edits)") }
++        Spacer(Modifier.height(24.dp))
++    }
++}
++
++/**
++ * The night's cards: score (optional, the Sleep tab has its own), how the score adds up, flags, stages and
++ * the night's numbers. [day] is the night's wake day ("yyyy-MM-dd"); null shows nothing.
++ */
++@Composable
++internal fun RunnerNightCards(vm: AppViewModel, day: String?, showScore: Boolean) {
++    val days by vm.recentDays.collectAsStateWithLifecycle()
++    val night = remember(days, day) { days.firstOrNull { it.day == day && (it.totalSleepMin ?: 0.0) > 0 } }
+     var sessions by remember { mutableStateOf<List<SleepSession>>(emptyList()) }
+     LaunchedEffect(days, night?.day) {
+-        val day = night?.day ?: return@LaunchedEffect
++        val nightDay = night?.day ?: return@LaunchedEffect
+         sessions = runCatching {
+             val strap = vm.activeStrapId
+-            val now = System.currentTimeMillis() / 1000L
+-            val from = now - 3 * 86_400L
++            val dayStart = runCatching {
++                java.time.LocalDate.parse(nightDay).atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond()
++            }.getOrDefault(System.currentTimeMillis() / 1000L)
++            val now = dayStart + 2 * 86_400L
++            val from = dayStart - 2 * 86_400L
+             fun localEndDay(s: SleepSession): String {
+                 val off = (java.util.TimeZone.getDefault().getOffset(s.endTs * 1000) / 1000).toLong()
+                 return AnalyticsEngine.dayString(s.endTs, off)
+@@ -88,16 +110,13 @@ private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
+             WhoopRepository.mergeSleepRichness(
+                 vm.repo.sleepSessionsUnion(strap, from, now),
+                 vm.repo.computedSleepSessionsUnion(strap, from, now),
+-            ) { localEndDay(it) }.filter { localEndDay(it) == day }.sortedBy { it.effectiveStartTs }
++            ) { localEndDay(it) }.filter { localEndDay(it) == nightDay }.sortedBy { it.effectiveStartTs }
+         }.getOrDefault(emptyList())
+     }
+ 
+-    Column(
+-        verticalArrangement = Arrangement.spacedBy(12.dp),
+-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+-    ) {
++    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+         if (night == null) {
+-            NoopCard { Text("No scored night yet. Wear your strap to bed and Rest appears here in the morning.", style = NoopType.body, color = Palette.textSecondary) }
++            if (showScore) NoopCard { Text("No scored night yet. Wear your strap to bed and your sleep score appears here in the morning.", style = NoopType.body, color = Palette.textSecondary) }
+             return@Column
+         }
+         val total = night.totalSleepMin ?: 0.0
+@@ -111,9 +130,9 @@ private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
+         val segs = main?.let { NightStages.parse(it.stagesJSON) }.orEmpty()
+ 
+         // Score
+-        NoopCard(tint = Palette.recoveryColor(score ?: 0.0)) {
++        if (showScore) NoopCard(tint = Palette.recoveryColor(score ?: 0.0)) {
+             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+-                Text("Rest, night ending ${night.day}", style = NoopType.subhead, color = Palette.textSecondary)
++                Text("Sleep score, night ending ${night.day}", style = NoopType.subhead, color = Palette.textSecondary)
+                 Text(score?.roundToInt()?.toString() ?: "-", style = NoopType.headline, color = Palette.textPrimary)
+                 if (bed != null && wake != null) {
+                     Text("${clock(bed)} to ${clock(wake)}", style = NoopType.body, color = Palette.textPrimary)
+@@ -194,9 +213,6 @@ private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
+                 night.skinTempDevC?.let { InfoRow("Skin temperature", "${if (it >= 0) "+" else ""}${"%.1f".format(it)} C from your normal") }
+             }
+         }
+-
+-        Button(onClick = onOpenSleep, modifier = Modifier.fillMaxWidth()) { Text("Open the Sleep tab (timeline and edits)") }
+-        Spacer(Modifier.height(24.dp))
+     }
+ }
+ 
+diff --git a/android/app/src/main/java/com/noop/ui/SleepScreen.kt b/android/app/src/main/java/com/noop/ui/SleepScreen.kt
+index 5dbc199..46d79bb 100644
+--- a/android/app/src/main/java/com/noop/ui/SleepScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/SleepScreen.kt
+@@ -723,6 +723,8 @@ fun SleepScreen(
+                     overline = nightLabel,
+                 )
+             }
++            // Fork (Rick): how the score adds up, flags, stages vs typical ranges and the night's numbers.
++            item { RunnerNightCards(vm, night?.dayKey, showScore = false) }
+             item { SleepAlarmsEntry(onOpenAlarms) }
+             // #sleep-layout: a compact "Arrange" affordance (the same Tune entry Today uses) opens the
+             // reorder / show-hide sheet. Pinned just above the arrangeable cards.
+diff --git a/android/app/src/main/java/com/noop/ui/TodayScreen.kt b/android/app/src/main/java/com/noop/ui/TodayScreen.kt
+index d40de76..bb53f14 100644
+--- a/android/app/src/main/java/com/noop/ui/TodayScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/TodayScreen.kt
+@@ -3168,7 +3168,11 @@ private fun ScoreHeroRow(
+                         caption = if (restPendingSync) {
+                             uiString(R.string.l10n_today_screen_pending_sync_cbe01f9e)
+                         } else {
+-                            null
++                            // Fork (Rick): hours slept under the Sleep label.
++                            day?.totalSleepMin?.takeIf { it > 0 }?.let { m ->
++                                val t = m.roundToInt()
++                                "${t / 60}h ${t % 60}m"
++                            }
+                         },
+                     ) {
+                         Box(contentAlignment = Alignment.Center) {
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index 8d5c17f..38e2917 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -2405,7 +2405,7 @@
+     <string name="today_card_coupled_subtitle">Recovery, strain and sleep in one glance</string>
+     <string name="today_metric_charge">Charge</string>
+     <string name="today_metric_effort">Effort</string>
+-    <string name="today_metric_rest">Rest</string>
++    <string name="today_metric_rest">Sleep</string>
+     <string name="today_metric_hrv">HRV</string>
+     <string name="today_metric_resting_hr">Resting HR</string>
+     <string name="today_metric_blood_oxygen">Blood oxygen</string>
+@@ -2615,8 +2615,8 @@
+     <string name="scoring_guide_effort_headline">Effort: how hard did your heart work?</string>
+     <string name="scoring_guide_effort_body">Effort measures cardiovascular load. Heart rate is converted into a training impulse using heart-rate-reserve zones, with harder zones weighted more heavily, then mapped to a logarithmic 0–100 scale. Steps and active energy provide a floor for long, low-cardio activity.</string>
+     <string name="scoring_guide_effort_vs_whoop">The idea is similar to WHOOP’s Day Strain (0–21), rescaled to 0–100. A 100 remains as rare as a 21.0.</string>
+-    <string name="scoring_guide_rest_headline">Rest: how restorative was your sleep?</string>
+-    <string name="scoring_guide_rest_body">Rest combines sleep duration versus your need (40 points), sleep efficiency (20), restorative deep and REM sleep (20), the consistency of sleep and wake times (10) and how often you woke up (10). Tap Rest on Today to see how last night adds up.</string>
++    <string name="scoring_guide_rest_headline">Sleep: how restorative was your sleep?</string>
++    <string name="scoring_guide_rest_body">Rest combines sleep duration versus your need (40 points), sleep efficiency (20), restorative deep and REM sleep (20), the consistency of sleep and wake times (10) and how often you woke up (10). Tap Sleep on Today to see how last night adds up.</string>
+     <string name="scoring_guide_rest_vs_whoop">The idea is similar to WHOOP’s Sleep Performance %, but our calculation is independent.</string>
+     <string name="scoring_guide_solid">Solid</string>
+     <string name="scoring_guide_building">Building</string>
+diff --git a/fork-version.txt b/fork-version.txt
+index 48082f7..b1bd38b 100644
+--- a/fork-version.txt
++++ b/fork-version.txt
+@@ -1 +1 @@
+-12
++13
