@@ -2482,7 +2482,7 @@
     <string name="today_synthesis_depleted">Depleted</string>
     <string name="today_synthesis_low">Low</string>
     <string name="today_synthesis_no_metrics">No metrics yet. Import your WHOOP export or wear the strap to begin.</string>
-    <string name="today_synthesis_peak">Peak</string>
+    <string name="today_synthesis_peak">Push</string>
     <string name="today_synthesis_steady">Steady</string>
     <string name="today_synthesis_strong">Strong</string>
     <string name="today_unit_bpm">bpm</string>

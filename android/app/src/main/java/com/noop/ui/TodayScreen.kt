@@ -1803,7 +1803,7 @@ fun TodayScreen(
                                     // The label names the window the DETAILED tiles graph, so it is only honest while they are
                                     // drawn: with the trend graphs off (the default) nothing in this section renders a
                                     // trend, and the header was still announcing one (#2376). Twin of the Apple change.
-                                    SectionHeader(uiString(R.string.today_section_key_metrics), overline = dayLabel, trailing = if (keyMetricsDetailed) trendWindowLabel(keyMetricsWindowDays) else null)
+                                    SectionHeader(uiString(R.string.today_section_key_metrics), overline = if (selectedDayOffset == 0) null else dayLabel /* Fork (Rick): the date is already at the top */, trailing = if (keyMetricsDetailed) trendWindowLabel(keyMetricsWindowDays) else null)
                                 }
                                 TodayEditAction(
                                     onClick = { showMetricsEditor = true },
@@ -3132,6 +3132,10 @@ private fun ScoreHeroRow(
                         R.string.today_action_open_detail,
                         uiString(R.string.today_metric_effort),
                     ),
+                    // Fork (Rick): the Synthesis word (Charge level) under Effort, coloured red to green.
+                    caption = (recovery ?: lastScoredCharge?.value)?.let { synthesisWord(it).uppercase() },
+                    captionColor = (recovery ?: lastScoredCharge?.value)?.let { runnerSynthesisColor(it) },
+                    captionStyle = NoopType.headline,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         // Show the optimal strain range as a gray segment in the Effort ring.
@@ -3247,6 +3251,9 @@ private fun HeroRingColumn(
     // measured against the circle and ellipsised its own explanation mid-word ("strap history still o...")
     // while spilling past the ring's edge.
     caption: String? = null,
+    // Fork (Rick): optional colour and style for the caption (the Synthesis word under Effort).
+    captionColor: Color? = null,
+    captionStyle: androidx.compose.ui.text.TextStyle? = null,
     ring: @Composable () -> Unit,
 ) {
     val domainLabel = uiString(
@@ -3337,8 +3344,8 @@ private fun HeroRingColumn(
             // component. Two lines at the column's width holds every locale we ship.
             Text(
                 text = caption,
-                style = NoopType.footnote,
-                color = Palette.textTertiary,
+                style = captionStyle ?: NoopType.footnote,
+                color = captionColor ?: Palette.textTertiary,
                 maxLines = 2,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -3546,7 +3553,8 @@ private fun SynthesisHeroCard(
         } else {
             synthesisDetail(day)
         }
-        if (synthesisExpanded) {
+        // Fork (Rick): the Synthesis word now sits under Effort in the score row, so the card is hidden.
+        if (!RUNNER_SHOW_SYNTHESIS_CARD) Unit else if (synthesisExpanded) {
             val expandedInteraction = remember { MutableInteractionSource() }
             Box(
                 modifier = Modifier
@@ -7337,12 +7345,13 @@ private fun TodayWorkoutsSection(workouts: List<WorkoutRow>, onSelect: (WorkoutR
     // Single column, newest first: the 2x2 grid truncated durations on narrow phones and read as
     // unrelated stat tiles rather than a chronological feed. Full-width tiles have room for the
     // kcal chip, so the #332 compactDelta workaround is no longer needed here.
-    val feed = lastWorkoutsFeed(workouts)
-    if (feed.isEmpty()) return
-
-    // "Latest Workouts", not "Last": "Last" read as "final". Mirrored on iOS (TodayView). Lives in
-    // strings.xml (values + values-de) so the header is localizable like the nav labels.
-    SectionHeader(stringResource(R.string.today_latest_workouts), overline = uiString(R.string.today_workouts_activity), trailing = uiString(R.string.today_workouts_14_days))
+    // Fork (Rick): this week's workouts, Sunday to Saturday, instead of the latest four over 14 days.
+    val feed = runnerThisWeekWorkouts(workouts)
+    SectionHeader("Your Workouts This Week", overline = uiString(R.string.today_workouts_activity), trailing = runnerWeekRangeLabel())
+    if (feed.isEmpty()) {
+        Text("No workouts yet this week.", style = NoopType.footnote, color = Palette.textTertiary)
+        return
+    }
     // #1694: the feed was read-only, so the only way to a session's detail was More > Workouts. The
     // tap opens the SAME read-only WorkoutDetailSheet the Workouts list uses — nothing there can edit
     // or delete, so a tap from Today carries no risk that list does not already carry.
@@ -7949,6 +7958,18 @@ private fun greetingWord(): String {
         h < 17 -> uiString(R.string.today_greeting_afternoon)
         else -> uiString(R.string.today_greeting_evening)
     }
+}
+
+/** Fork (Rick): the Synthesis card is replaced by the coloured word under Effort. */
+private const val RUNNER_SHOW_SYNTHESIS_CARD = false
+
+/** Fork (Rick): Synthesis word colour, red (Depleted) through yellow (Steady) to green (Push). */
+private fun runnerSynthesisColor(score: Double): Color = when {
+    score < 25 -> Color(0xFFE5483B)
+    score < 50 -> Color(0xFFF08A24)
+    score < 70 -> Color(0xFFF2C53D)
+    score < 88 -> Color(0xFF9BD14B)
+    else -> Color(0xFF2ECC71)
 }
 
 @Composable

@@ -77,3 +77,28 @@ internal fun FinishedWorkoutHost(vm: AppViewModel) {
         WorkoutDetailSheet(vm = vm, row = row, onDismiss = { vm.clearFinishedWorkout() })
     }
 }
+
+// Fork addition (Rick): the Today workouts list shows this week, Sunday to Saturday, in local time.
+
+private fun runnerWeekStart(nowMs: Long = System.currentTimeMillis()): java.time.ZonedDateTime {
+    val zone = java.time.ZoneId.systemDefault()
+    val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+    val sunday = today.minusDays((today.dayOfWeek.value % 7).toLong()) // Sunday = 7 -> 0 days back
+    return sunday.atStartOfDay(zone)
+}
+
+/** Workouts that started this week (Sunday 00:00 to the next Sunday), newest first, cross-source duplicates removed. */
+internal fun runnerThisWeekWorkouts(rows: List<com.noop.data.WorkoutRow>, nowMs: Long = System.currentTimeMillis()): List<com.noop.data.WorkoutRow> {
+    val start = runnerWeekStart(nowMs).toEpochSecond()
+    val end = start + 7 * 86_400L
+    return com.noop.ui.WorkoutEditing.dedupCrossSource(rows).filter { it.startTs in start until end }.sortedByDescending { it.startTs }
+}
+
+/** "Nov 22 to 28" (or "Nov 29 to Dec 5") for the week shown. */
+internal fun runnerWeekRangeLabel(nowMs: Long = System.currentTimeMillis()): String {
+    val start = runnerWeekStart(nowMs).toLocalDate()
+    val end = start.plusDays(6)
+    val m = java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.getDefault())
+    val d = java.time.format.DateTimeFormatter.ofPattern(if (end.month == start.month) "d" else "MMM d", java.util.Locale.getDefault())
+    return start.format(m) + " to " + end.format(d)
+}
