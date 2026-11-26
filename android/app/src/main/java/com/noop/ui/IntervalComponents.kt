@@ -218,23 +218,38 @@ internal fun IvProgressBar(fraction: Float, color: Color) {
     }
 }
 
-/** Fork: shows the active "stay in Zone N or below" alert, turning red while you are over. */
+/** Fork: shows the active heart-rate alert: red while over the ceiling, amber while under the floor. */
 @Composable
 internal fun HrCapStatusLine(workoutStartMs: Long) {
     val g by com.noop.intervals.HrZoneGuard.state.collectAsStateWithLifecycle()
     if (!g.active || g.linkedWorkoutStartMs != workoutStartMs) return
-    val color = if (g.alerting) Palette.statusCritical else Palette.statusPositive
+    val color = when {
+        g.alerting -> Palette.statusCritical
+        g.lowAlerting -> Palette.statusWarning
+        else -> Palette.statusPositive
+    }
     val limit = when {
-        g.capBpm <= 0 -> null
-        g.isCustom -> "below ${g.capBpm} bpm"
-        else -> "Zone ${g.zone} or below (max ${g.capBpm} bpm)"
+        g.capBpm > 0 && g.floorBpm > 0 -> "${g.floorBpm} to ${g.capBpm} bpm"
+        g.capBpm > 0 && g.isCustom -> "below ${g.capBpm} bpm"
+        g.capBpm > 0 -> "Zone ${g.zone} or below (max ${g.capBpm} bpm)"
+        g.floorBpm > 0 -> "above ${g.floorBpm} bpm"
+        else -> null
+    }
+    val floorNote = when {
+        g.floorBpm <= 0 -> ""
+        g.warmupLeftS > 0 -> " (low alert in ${(g.warmupLeftS + 59) / 60} min)"
+        g.floorResting -> " (low alert paused for rest)"
+        else -> ""
     }
     val avg = if (g.targetAvg > 0) {
-        " · avg ${if (g.avgBpm > 0) g.avgBpm.toString() else "—"} / target ${g.targetAvg}"
+        " · avg ${if (g.avgBpm > 0) g.avgBpm.toString() else "-"} / target ${g.targetAvg}"
     } else ""
     Text(
-        if (g.alerting) "Over ${g.capBpm} bpm. Ease off.$avg"
-        else (limit?.let { "HR alert: $it" } ?: "HR") + avg,
+        when {
+            g.alerting -> "Over ${g.capBpm} bpm. Ease off.$avg"
+            g.lowAlerting -> "Below ${g.floorBpm} bpm. Pick it up.$avg"
+            else -> (limit?.let { "HR alert: $it" } ?: "HR") + floorNote + avg
+        },
         style = NoopType.subhead,
         color = color,
         modifier = Modifier

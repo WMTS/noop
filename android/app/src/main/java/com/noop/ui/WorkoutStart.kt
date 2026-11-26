@@ -83,6 +83,10 @@ fun StartWorkoutSheet(
     var hrCapZone by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.zone(context)) }
     var hrCustomBpm by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.customBpm(context)) }
     var hrTargetAvg by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.targetAvg(context)) }
+    // Fork: heart-rate floor ("stay above"), its custom bpm and the warm-up before it is watched.
+    var hrFloorZone by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.floorZone(context)) }
+    var hrFloorBpm by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.floorCustomBpm(context)) }
+    var hrWarmupMin by remember { mutableStateOf(com.noop.intervals.HrCapPrefs.warmupMin(context)) }
     var pickingHrCap by remember { mutableStateOf(false) }
     // Fork: shoe for this run; running sports start on the default pair.
     var shoeId by remember(selected) {
@@ -207,9 +211,9 @@ fun StartWorkoutSheet(
                     Text("HR alert", style = NoopType.body, color = Palette.textPrimary)
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        hrCapLabel(context, hrCapZone, hrTargetAvg),
+                        hrCapLabel(context, hrCapZone, hrTargetAvg, hrFloorZone),
                         style = NoopType.body,
-                        color = if (hrCapZone > 0 || hrTargetAvg > 0) Palette.accent else Palette.textTertiary,
+                        color = if (hrCapZone > 0 || hrTargetAvg > 0 || hrFloorZone > 0) Palette.accent else Palette.textTertiary,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -279,9 +283,11 @@ fun StartWorkoutSheet(
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        "Warns you (voice, beep, strap buzz) when your heart rate stays above the limit for 15 seconds.",
+                        "Warns you (voice, beep, buzz) when your heart rate stays above the ceiling for 15 seconds, or below " +
+                            "the floor for 30 seconds. Set either one or both.",
                         style = NoopType.footnote, color = Palette.textTertiary,
                     )
+                    Text("Ceiling", style = NoopType.subhead, color = Palette.textPrimary, modifier = Modifier.padding(top = 8.dp))
                     // Fork: a set bpm ceiling (e.g. a coach's "stay under 150").
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -320,6 +326,90 @@ fun StartWorkoutSheet(
                                 com.noop.intervals.HrCapPrefs.setZone(context, z)
                             }.padding(vertical = 10.dp),
                         )
+                    }
+                    // Fork: the floor ("stay above"), quiet during the warm-up and interval rest / walk steps.
+                    Text("Floor", style = NoopType.subhead, color = Palette.textPrimary, modifier = Modifier.padding(top = 12.dp))
+                    Text(
+                        "Waits until your warm-up is over and stays quiet during interval rest and walk steps and while paused.",
+                        style = NoopType.footnote, color = Palette.textTertiary,
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            hrFloorZone = com.noop.intervals.HrCapPrefs.CUSTOM
+                            com.noop.intervals.HrCapPrefs.setFloorZone(context, hrFloorZone)
+                        }.padding(vertical = 8.dp),
+                    ) {
+                        Text(
+                            "Stay above",
+                            style = NoopType.body,
+                            color = if (hrFloorZone == com.noop.intervals.HrCapPrefs.CUSTOM) Palette.accent else Palette.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        androidx.compose.material3.TextButton(onClick = {
+                            hrFloorBpm = (hrFloorBpm - 5).coerceAtLeast(60)
+                            com.noop.intervals.HrCapPrefs.setFloorCustomBpm(context, hrFloorBpm)
+                            hrFloorZone = com.noop.intervals.HrCapPrefs.CUSTOM
+                            com.noop.intervals.HrCapPrefs.setFloorZone(context, hrFloorZone)
+                        }) { Text("-5") }
+                        Text("$hrFloorBpm bpm", style = NoopType.bodyNumber, color = Palette.textPrimary)
+                        androidx.compose.material3.TextButton(onClick = {
+                            hrFloorBpm = (hrFloorBpm + 5).coerceAtMost(200)
+                            com.noop.intervals.HrCapPrefs.setFloorCustomBpm(context, hrFloorBpm)
+                            hrFloorZone = com.noop.intervals.HrCapPrefs.CUSTOM
+                            com.noop.intervals.HrCapPrefs.setFloorZone(context, hrFloorZone)
+                        }) { Text("+5") }
+                    }
+                    (0..5).forEach { z ->
+                        Text(
+                            hrFloorLabel(context, z),
+                            style = NoopType.body,
+                            color = if (z == hrFloorZone) Palette.accent else Palette.textPrimary,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                hrFloorZone = z
+                                com.noop.intervals.HrCapPrefs.setFloorZone(context, z)
+                            }.padding(vertical = 10.dp),
+                        )
+                    }
+                    // Quick range: one tap sets both ends to a zone.
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text("Stay in zone", style = NoopType.body, color = Palette.textPrimary, modifier = Modifier.weight(1f))
+                        (1..4).forEach { z ->
+                            androidx.compose.material3.TextButton(onClick = {
+                                hrCapZone = z
+                                com.noop.intervals.HrCapPrefs.setZone(context, z)
+                                hrFloorZone = z
+                                com.noop.intervals.HrCapPrefs.setFloorZone(context, z)
+                            }) { Text("$z") }
+                        }
+                    }
+                    val capNow = com.noop.intervals.HrCapPrefs.capBpm(context, hrCapZone)
+                    val floorNow = com.noop.intervals.HrCapPrefs.floorBpm(context, hrFloorZone)
+                    if (capNow != null && floorNow != null && floorNow >= capNow) {
+                        Text(
+                            "The floor ($floorNow) must be below the ceiling ($capNow). Only the ceiling will be used.",
+                            style = NoopType.footnote, color = Palette.statusWarning,
+                        )
+                    }
+                    if (hrFloorZone > 0) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Warm-up", style = NoopType.body, color = Palette.textPrimary)
+                                Text("No low alerts until then", style = NoopType.footnote, color = Palette.textTertiary)
+                            }
+                            androidx.compose.material3.TextButton(onClick = {
+                                hrWarmupMin = (hrWarmupMin - 1).coerceAtLeast(0)
+                                com.noop.intervals.HrCapPrefs.setWarmupMin(context, hrWarmupMin)
+                            }) { Text("-1") }
+                            Text("$hrWarmupMin min", style = NoopType.bodyNumber, color = Palette.textPrimary)
+                            androidx.compose.material3.TextButton(onClick = {
+                                hrWarmupMin = (hrWarmupMin + 1).coerceAtMost(15)
+                                com.noop.intervals.HrCapPrefs.setWarmupMin(context, hrWarmupMin)
+                            }) { Text("+1") }
+                        }
                     }
                     // Fork: target average, read out every 10 minutes.
                     Row(
@@ -360,10 +450,20 @@ fun StartWorkoutSheet(
     }
 }
 
-/** Fork: "Off", "Below 150 bpm" or "Zone 2 or below (max 142 bpm)", plus the target average if set. */
-private fun hrCapLabel(context: android.content.Context, zone: Int, targetAvg: Int): String {
+/** Fork: a floor choice in the HR alert dialog: "Off", "Zone 2 or above (min 115 bpm)". */
+private fun hrFloorLabel(context: android.content.Context, zone: Int): String {
+    if (zone == 0) return "No floor"
+    val f = com.noop.intervals.HrCapPrefs.floorBpm(context, zone)
+    return if (f != null) "Zone $zone or above (min $f bpm)" else "Zone $zone or above"
+}
+
+/** Fork: "Off", "Below 150 bpm", "Zone 2 or below (max 142 bpm)" or "120 to 150 bpm", plus the target average if set. */
+private fun hrCapLabel(context: android.content.Context, zone: Int, targetAvg: Int, floorZone: Int = 0): String {
     val cap = com.noop.intervals.HrCapPrefs.capBpm(context, zone)
+    val floor = com.noop.intervals.HrCapPrefs.floorBpm(context, floorZone)?.takeIf { cap == null || it < cap }
     val limit = when {
+        floor != null && cap != null -> "$floor to $cap bpm"
+        floor != null -> "Above $floor bpm"
         zone == 0 -> null
         zone == com.noop.intervals.HrCapPrefs.CUSTOM -> "Below $cap bpm"
         cap != null -> "Zone $zone or below (max $cap bpm)"

@@ -40,7 +40,7 @@ object AppChangelog {
         // Fork (Rick): what NOOP Runner adds, and how its numbers are worked out. Not a version bump, so the
         // sheet does not pop up by itself; it sits at the top of Settings > What's new.
         Release(
-            version = "Runner build 10",
+            version = "Runner build 11",
             title = "NOOP Runner: running features and how they are calculated",
             date = "November 2026",
             items = listOf(
@@ -52,7 +52,7 @@ object AppChangelog {
                 "Chest strap for workouts. Pair any Bluetooth chest strap (Polar H10, H9, H7, Verity Sense, Garmin HRM, Wahoo TICKR and others) in Devices, pick it in Settings > Chest strap for workouts, and it connects only during workouts while your WHOOP stays connected for sleep and recovery. While the strap is sending, the workout's heart rate, HR alert and interval splits use it; if it drops out for 5 seconds the WHOOP takes over. Test connection checks it before a run.",
                 "Set up NOOP Runner. New users see a short checklist on Today (profile, shoes, heart rate, indoor track, Strava, chest strap) until it is done or hidden.",
                 "Easier buttons mid-run. Pause and End are bigger, with bold white text and an icon each. Delete is a small link at the bottom of the screen and always asks 'Are you sure you want to delete your progress?', with Keep going as the big button.",
-                "Heart-rate alert. Set a stay-below ceiling (a bpm or the top of a zone) and a target average; you are told when you go over and hear your average every 10 minutes. Start a workout > HR alert.",
+                "Heart-rate alert. Set a ceiling (stay below a bpm or the top of a zone), a floor (stay above a bpm or the bottom of a zone), or both for a range; Stay in zone sets both from one zone. Over the ceiling for 15 seconds you hear Slow down with two short buzzes; under the floor for 30 seconds you hear Pick it up with one long buzz, and it repeats at most once a minute. The floor stays quiet for the warm-up (5 minutes, adjustable), during interval rest and walk steps and while paused. Each workout shows its time in range, above and below. A target average is read out every 10 minutes. Start a workout > HR alert.",
                 "Calories from distance. Runs and walks with a distance are costed with the ACSM running and walking equations: about 1 kcal per kg per km running and half that walking, whatever the pace. With intervals, each step is costed as a run or a walk, so walk breaks are not counted at running cost. Climbing adds ACSM's grade term (0.9 ml/kg per metre climbed running, 1.8 walking); descents are not credited. Workouts without a distance use heart rate (Keytel).",
                 "Elevation gain. GPS workouts record how much you climbed, from the phone's barometer when it has one, otherwise from GPS altitude. Readings are smoothed and a climb only counts once it rises past a small threshold (2 m barometer, 5 m GPS), so sensor noise on flat ground adds nothing. Shown on the workout and used for calories.",
                 "Smoother GPS distance. Each GPS fix is averaged with the two before it, and distance only builds once you have moved 4 m from the last counted point. Standing at a light or walking a break no longer adds distance from GPS wobble, which keeps distance, pace, splits, calories and shoe miles honest. The route map is left as recorded.",
@@ -62,7 +62,7 @@ object AppChangelog {
                 "Health Connect. Workouts share their interval segments or track laps, and active calories, as well as distance and heart rate. GPS routes are not shared.",
                 "Indigo theme and a runner's Today. An Indigo preset with a ribbed dark backdrop and hex entry for any accent; Today has a Start workout card, and the finished workout opens when you press End.",
                 "Each workout says how it was worked out. Workouts recorded in NOOP Runner list where their distance, calories and zones came from, in a How these numbers were worked out section.",
-                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.10), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
+                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.11), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
             ),
         ),
         Release(

@@ -192,6 +192,32 @@ internal fun RunnerMethodNote(row: com.noop.data.WorkoutRow, divider: @Composabl
     }
 }
 
+/** Time below, inside and above the heart-rate alert range, for workouts recorded with a ceiling or floor. */
+@Composable
+internal fun HrRangeSection(startTs: Long, divider: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val r = remember(startTs) { com.noop.intervals.HrRangeStore.load(context, startTs) } ?: return
+    if (r.totalS < 60) return
+    fun clock(s: Int) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+    fun pct(s: Int) = (s * 100.0 / r.totalS).roundToInt()
+    val title = when {
+        r.floor > 0 && r.cap > 0 -> "Heart rate range ${r.floor} to ${r.cap} bpm"
+        r.floor > 0 -> "Heart rate floor ${r.floor} bpm"
+        else -> "Heart rate ceiling ${r.cap} bpm"
+    }
+    divider()
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = NoopType.subhead, color = Palette.textPrimary)
+        Text("In range ${clock(r.inS)} (${pct(r.inS)}%)", style = NoopType.body, color = Palette.statusPositive)
+        if (r.cap > 0) Text("Above ${clock(r.aboveS)} (${pct(r.aboveS)}%)", style = NoopType.body, color = Palette.textSecondary)
+        if (r.floor > 0) Text("Below ${clock(r.belowS)} (${pct(r.belowS)}%)", style = NoopType.body, color = Palette.textSecondary)
+        Text(
+            "Counted every second you were moving. Time below includes the warm-up and rest steps, when the low alert stays quiet.",
+            style = NoopType.footnote, color = Palette.textTertiary,
+        )
+    }
+}
+
 /** One sentence naming the zone model in use, for the notes under zone charts. */
 internal fun runnerZoneSentence(reserve: Boolean, customZones: Boolean): String = when {
     reserve -> "Zones: heart-rate reserve, built from your resting and max heart rate (Settings > Runner heart rate)."

@@ -1687,6 +1687,8 @@ internal fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: ()
             IndoorLapsSection(row.startTs) { CardDivider() }
             // Fork: where this workout's distance, calories and zones came from.
             RunnerMethodNote(row) { CardDivider() }
+            // Fork: time below / in / above the heart-rate alert range.
+            HrRangeSection(row.startTs) { CardDivider() }
             // Fork: Strava status, Send to Strava and Export TCX.
             StravaWorkoutSection(vm, row) { CardDivider() }
 

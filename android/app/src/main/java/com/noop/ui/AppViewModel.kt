@@ -1666,8 +1666,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!gpsEnabled && indoorTrack != null) com.noop.intervals.IndoorLapSession.start(appContext, startMs, indoorTrack)
         // Fork: connect the chosen chest strap for this workout (the WHOOP stays connected).
         com.noop.intervals.WorkoutStrap.startForWorkout(appContext) { ingestHr(it, fromWorkoutStrap = true) }
-        // Fork: heart-rate ceiling alert ("stay in Zone N or below").
-        if (hrCapZone > 0 || com.noop.intervals.HrCapPrefs.targetAvg(appContext) > 0) {
+        // Fork: heart-rate alert (ceiling, floor, target average).
+        if (com.noop.intervals.HrCapPrefs.anyOn(appContext, hrCapZone)) {
             com.noop.intervals.HrZoneGuard.start(appContext, hrCapZone, linkedWorkoutStartMs = startMs)
         }
     }
