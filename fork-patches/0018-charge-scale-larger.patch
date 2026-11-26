@@ -1,0 +1,80 @@
+diff --git a/android/app/src/main/java/com/noop/ui/AppChangelog.kt b/android/app/src/main/java/com/noop/ui/AppChangelog.kt
+index c593e2b..0fa5f6b 100644
+--- a/android/app/src/main/java/com/noop/ui/AppChangelog.kt
++++ b/android/app/src/main/java/com/noop/ui/AppChangelog.kt
+@@ -40,7 +40,7 @@ object AppChangelog {
+         // Fork (Rick): what NOOP Runner adds, and how its numbers are worked out. Not a version bump, so the
+         // sheet does not pop up by itself; it sits at the top of Settings > What's new.
+         Release(
+-            version = "Runner build 17",
++            version = "Runner build 18",
+             title = "NOOP Runner: running features and how they are calculated",
+             date = "November 2026",
+             items = listOf(
+@@ -66,7 +66,7 @@ object AppChangelog {
+                 "Health Connect. Workouts share their interval segments or track laps, and active calories, as well as distance and heart rate. GPS routes are not shared.",
+                 "Indigo theme and a runner's Today. An Indigo preset with a ribbed dark backdrop and hex entry for any accent; Today has a Start workout card, and the finished workout opens when you press End.",
+                 "Each workout says how it was worked out. Workouts recorded in NOOP Runner list where their distance, calories and zones came from, in a How these numbers were worked out section.",
+-                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.17), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
++                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.18), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
+             ),
+         ),
+         Release(
+diff --git a/android/app/src/main/java/com/noop/ui/TodayScreen.kt b/android/app/src/main/java/com/noop/ui/TodayScreen.kt
+index 4a4aa7f..d4c7225 100644
+--- a/android/app/src/main/java/com/noop/ui/TodayScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/TodayScreen.kt
+@@ -7977,24 +7977,29 @@ private fun RunnerChargeScale(score: Double?) {
+         score < 88 -> 3
+         else -> 4
+     }
+-    Row(
+-        modifier = Modifier.fillMaxWidth().padding(start = Metrics.gap, end = Metrics.gap, bottom = Metrics.space16),
+-        horizontalArrangement = Arrangement.Center,
+-        verticalAlignment = Alignment.CenterVertically,
+-    ) {
+-        words.forEachIndexed { i, res ->
+-            if (i > 0) {
+-                Text("·", style = NoopType.footnote, color = Palette.textTertiary, modifier = Modifier.padding(horizontal = 5.dp))
++    // Larger type on wide screens (foldables, big phones); a step smaller on narrow ones so the row fits.
++    BoxWithConstraints(Modifier.fillMaxWidth().padding(start = Metrics.gap, end = Metrics.gap, bottom = Metrics.space16)) {
++        val wide = maxWidth >= 400.dp
++        val onStyle = NoopType.title2.copy(fontSize = if (wide) 26.sp else 21.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
++        val offStyle = NoopType.body.copy(fontSize = if (wide) 15.sp else 12.sp)
++        Row(
++            modifier = Modifier.fillMaxWidth(),
++            horizontalArrangement = Arrangement.Center,
++            verticalAlignment = Alignment.CenterVertically,
++        ) {
++            words.forEachIndexed { i, res ->
++                if (i > 0) {
++                    Text("·", style = offStyle, color = Palette.textTertiary, modifier = Modifier.padding(horizontal = if (wide) 7.dp else 4.dp))
++                }
++                val on = i == active
++                Text(
++                    uiString(res).uppercase(),
++                    style = if (on) onStyle else offStyle,
++                    color = if (on) runnerSynthesisColor(score) else Palette.textTertiary,
++                    maxLines = 1,
++                    softWrap = false,
++                )
+             }
+-            val on = i == active
+-            Text(
+-                uiString(res).uppercase(),
+-                style = if (on) NoopType.headline else NoopType.footnote,
+-                color = if (on) runnerSynthesisColor(score) else Palette.textTertiary,
+-                fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.Bold else null,
+-                maxLines = 1,
+-                softWrap = false,
+-            )
+         }
+     }
+ }
+diff --git a/fork-version.txt b/fork-version.txt
+index 98d9bcb..3c03207 100644
+--- a/fork-version.txt
++++ b/fork-version.txt
+@@ -1 +1 @@
+-17
++18
