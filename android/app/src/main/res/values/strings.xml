@@ -1907,7 +1907,7 @@
     <string name="explore_metric_mood">Mood</string>
     <string name="explore_description_charge">How recovered you are, led by HRV versus your personal baseline.</string>
     <string name="explore_description_effort">Cardiovascular load for the day, on a 0-100 scale (was 0-21).</string>
-    <string name="explore_description_rest">How restorative your sleep was: duration, efficiency, deep+REM, timing.</string>
+    <string name="explore_description_rest">How restorative your sleep was: duration, efficiency, deep+REM, timing, wake-ups.</string>
     <string name="l10n_workouts_screen_heart_rate_recovery_516">Heart Rate Recovery</string>
     <string name="l10n_workouts_screen_after_high_intensity_effort_516">After high-intensity effort</string>
     <string name="l10n_workouts_screen_peak_hr_bpm_516">Peak %1$d bpm</string>
@@ -2616,7 +2616,7 @@
     <string name="scoring_guide_effort_body">Effort measures cardiovascular load. Heart rate is converted into a training impulse using heart-rate-reserve zones, with harder zones weighted more heavily, then mapped to a logarithmic 0–100 scale. Steps and active energy provide a floor for long, low-cardio activity.</string>
     <string name="scoring_guide_effort_vs_whoop">The idea is similar to WHOOP’s Day Strain (0–21), rescaled to 0–100. A 100 remains as rare as a 21.0.</string>
     <string name="scoring_guide_rest_headline">Rest: how restorative was your sleep?</string>
-    <string name="scoring_guide_rest_body">Rest combines sleep duration versus your need, sleep efficiency, restorative deep and REM sleep, and the consistency of sleep and wake times.</string>
+    <string name="scoring_guide_rest_body">Rest combines sleep duration versus your need (40 points), sleep efficiency (20), restorative deep and REM sleep (20), the consistency of sleep and wake times (10) and how often you woke up (10). Tap Rest on Today to see how last night adds up.</string>
     <string name="scoring_guide_rest_vs_whoop">The idea is similar to WHOOP’s Sleep Performance %, but our calculation is independent.</string>
     <string name="scoring_guide_solid">Solid</string>
     <string name="scoring_guide_building">Building</string>

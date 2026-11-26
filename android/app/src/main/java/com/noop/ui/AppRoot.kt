@@ -744,10 +744,16 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Destination.VitalSignsDetail.route) { backStackEntry ->
-                    VitalDetailScreen(
-                        vm = viewModel,
-                        key = backStackEntry.arguments?.getString("key").orEmpty(),
-                    )
+                    val vitalKey = backStackEntry.arguments?.getString("key").orEmpty()
+                    if (vitalKey == HERO_REST_METRIC_KEY) {
+                        // Fork (Rick): Rest opens the score breakdown and last night's details.
+                        RunnerRestScreen(viewModel, onOpenSleep = { nav.navigateTopLevel(Destination.Sleep.route) })
+                    } else {
+                        VitalDetailScreen(
+                            vm = viewModel,
+                            key = vitalKey,
+                        )
+                    }
                 }
                 // --- v5 pillar screens (Wave 3 wiring) ---
                 composable(Destination.InsightsHub.route) { InsightsHubScreen(viewModel) }

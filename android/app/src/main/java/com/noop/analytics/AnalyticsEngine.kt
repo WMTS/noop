@@ -484,11 +484,11 @@ object AnalyticsEngine {
         // night-window stream the caller passed for the rest of this analysis; the pass self-gates on its
         // observed density, so an empty/sparse `steps` (e.g. a WHOOP 4.0, which never emits a step sample
         // at all) is a no-op regardless of `useMotionAwareWake`.
-        val refinedSessions = if (useMotionAwareWake) {
+        val refinedSessions = (if (useMotionAwareWake) {
             detectedSessions.map { WakeMotionRefinement.refine(it, gravity, steps) }
         } else {
             detectedSessions
-        }
+        }).map { com.noop.intervals.GetUpTrim.trim(it, hr, steps) } // Fork (Rick): end the night at a get-up
         // #804 Fix A: fold in the caller's device-provided hypnogram (see [providedSleep]). Empty = the
         // byte-identical motion-only path. Otherwise enrich each provided session's nightly restingHR/avgHRV
         // from THIS day's hr/rr over its window (the stored ring row carries neither), using the SAME helpers
@@ -1767,6 +1767,8 @@ object RestScorer {
      * Swift `AnalyticsEngine.Rest.composite(daily:)`.
      */
     fun restFromDaily(daily: DailyMetric, consistency: Double? = null): Double? {
+        // Fork (Rick): NOOP Runner's Rest (adds a Disturbances part) for nights computed on the phone.
+        com.noop.intervals.RunnerRest.score(daily, consistency)?.let { return it }
         val tstMin = daily.totalSleepMin ?: return null
         val eff = daily.efficiency ?: return null
         if (tstMin <= 0.0) return null

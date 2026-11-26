@@ -70,7 +70,8 @@ private enum class PrimerSection(
         title = uiString(R.string.l10n_how_noop_works_screen_how_your_sleep_is_sorted_6a8e82e0),
         body = "NOOP picks your main sleep as your longest real block, and (once it has " +
             "learned your usual hours) the one nearest your normal sleep time. Everything " +
-            "else that day is a nap. You can always edit bed and wake times.",
+            "else that day is a nap. NOOP Runner also ends the night when your strap sees you walking and " +
+            "your heart rate does not settle back to sleeping levels. You can always edit bed and wake times.",
         icon = Icons.Filled.Bedtime,
     ),
     SCORES(
