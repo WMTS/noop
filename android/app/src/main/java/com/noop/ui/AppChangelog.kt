@@ -40,7 +40,7 @@ object AppChangelog {
         // Fork (Rick): what NOOP Runner adds, and how its numbers are worked out. Not a version bump, so the
         // sheet does not pop up by itself; it sits at the top of Settings > What's new.
         Release(
-            version = "Runner build 16",
+            version = "Runner build 17",
             title = "NOOP Runner: running features and how they are calculated",
             date = "November 2026",
             items = listOf(
@@ -55,7 +55,7 @@ object AppChangelog {
                 "Heart-rate alert. Set a ceiling (stay below a bpm or the top of a zone), a floor (stay above a bpm or the bottom of a zone), or both for a range; Stay in zone sets both from one zone. Over the ceiling for 15 seconds you hear Slow down with two short buzzes; under the floor for 30 seconds you hear Pick it up with one long buzz, and it repeats at most once a minute. The floor stays quiet for the warm-up (5 minutes, adjustable), during interval rest and walk steps and while paused. Each workout shows its time in range, above and below. A target average is read out every 10 minutes. Start a workout > HR alert.",
                 "Sleep score that matches your night. The third ring on Today is now called Sleep (it is the same score NOOP calls Rest). Tap it to open the Sleep tab, which now shows how the score adds up, light, deep and REM with typical ranges, wake-ups, time to fall asleep, lowest heart rate, HRV and breathing rate, and a note when something looks off (like REM over 30%). Nights scored on your phone now count wake-ups: the score is duration 40 (against 8 hours), efficiency 20, deep and REM 20, consistency 10 and disturbances 10 (full marks up to 2 wake-ups, 12.5 points off for each one after). Imported nights keep the original formula. With a WHOOP 5.0 or MG, the night now ends when you start walking and your heart rate does not settle back to sleeping levels, so sitting quietly after getting up is no longer counted as sleep.",
                 "Key Metrics on Today. Every tile you choose with Edit now shows, with no Show all / Show fewer link, and Est. VO2 max is a new tile (the estimate NOOP already makes from your heart rate, in ml/kg/min; tap it for the trend). It is added once to your layout; remove it with Edit if you don't want it. The date above Key Metrics only shows when you look back at an earlier day.",
-                "Charge in one word, under Effort. The old Synthesis card is now a single coloured word under Effort in the score row: Depleted (red, Charge under 25), Low (orange, 25 to 49), Steady (yellow, 50 to 69), Strong (light green, 70 to 87) and Push (green, 88 and up; it was called Peak).",
+                "Charge scale under the score rings. The old Synthesis card is now a row of five words under the rings, DEPLETED, LOW, STEADY, STRONG and PUSH, separated by dots; the one for today's Charge is larger and coloured, the rest small and grey: Depleted (red, Charge under 25), Low (orange, 25 to 49), Steady (yellow, 50 to 69), Strong (light green, 70 to 87) and Push (green, 88 and up; it was called Peak).",
                 "Your workouts this week. Today lists every workout from Sunday to Saturday of the current week, newest first, instead of the latest four from the last 14 days.",
                 "Calories from distance. Runs and walks with a distance are costed with the ACSM running and walking equations: about 1 kcal per kg per km running and half that walking, whatever the pace. With intervals, each step is costed as a run or a walk, so walk breaks are not counted at running cost. Climbing adds ACSM's grade term (0.9 ml/kg per metre climbed running, 1.8 walking); descents are not credited. Workouts without a distance use heart rate (Keytel).",
                 "Elevation gain. GPS workouts record how much you climbed, from the phone's barometer when it has one, otherwise from GPS altitude. Readings are smoothed and a climb only counts once it rises past a small threshold (2 m barometer, 5 m GPS), so sensor noise on flat ground adds nothing. Shown on the workout and used for calories.",
@@ -66,7 +66,7 @@ object AppChangelog {
                 "Health Connect. Workouts share their interval segments or track laps, and active calories, as well as distance and heart rate. GPS routes are not shared.",
                 "Indigo theme and a runner's Today. An Indigo preset with a ribbed dark backdrop and hex entry for any accent; Today has a Start workout card, and the finished workout opens when you press End.",
                 "Each workout says how it was worked out. Workouts recorded in NOOP Runner list where their distance, calories and zones came from, in a How these numbers were worked out section.",
-                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.16), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
+                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.17), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
             ),
         ),
         Release(

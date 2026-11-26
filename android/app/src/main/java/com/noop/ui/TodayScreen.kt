@@ -3046,7 +3046,8 @@ private fun ScoreHeroRow(
     val heroVesselsAnimated =
         recovery != null || strain != null || restScore != null || lastScoredCharge != null
 
-    Box(
+    // Fork (Rick): a Column (was a Box with one child) so the Charge scale can sit under the rings.
+    Column(
         modifier = Modifier
             .fillMaxWidth(),
     ) {
@@ -3132,10 +3133,6 @@ private fun ScoreHeroRow(
                         R.string.today_action_open_detail,
                         uiString(R.string.today_metric_effort),
                     ),
-                    // Fork (Rick): the Synthesis word (Charge level) under Effort, coloured red to green.
-                    caption = (recovery ?: lastScoredCharge?.value)?.let { synthesisWord(it).uppercase() },
-                    captionColor = (recovery ?: lastScoredCharge?.value)?.let { runnerSynthesisColor(it) },
-                    captionStyle = NoopType.headline,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         // Show the optimal strain range as a gray segment in the Effort ring.
@@ -3219,6 +3216,8 @@ private fun ScoreHeroRow(
                 }
             }
         }
+        // Fork (Rick): the five Charge words in a row, the current one coloured and larger.
+        RunnerChargeScale(recovery ?: lastScoredCharge?.value)
     }
 }
 
@@ -7960,7 +7959,47 @@ private fun greetingWord(): String {
     }
 }
 
-/** Fork (Rick): the Synthesis card is replaced by the coloured word under Effort. */
+/**
+ * Fork (Rick): DEPLETED · LOW · STEADY · STRONG · PUSH under the score rings. The word for today's Charge is
+ * larger and coloured (red to green); the others are small and grey, separated by grey dots.
+ */
+@Composable
+private fun RunnerChargeScale(score: Double?) {
+    if (score == null) return
+    val words = listOf(
+        R.string.today_synthesis_depleted, R.string.today_synthesis_low, R.string.today_synthesis_steady,
+        R.string.today_synthesis_strong, R.string.today_synthesis_peak,
+    )
+    val active = when {
+        score < 25 -> 0
+        score < 50 -> 1
+        score < 70 -> 2
+        score < 88 -> 3
+        else -> 4
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = Metrics.gap, end = Metrics.gap, bottom = Metrics.space16),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        words.forEachIndexed { i, res ->
+            if (i > 0) {
+                Text("·", style = NoopType.footnote, color = Palette.textTertiary, modifier = Modifier.padding(horizontal = 5.dp))
+            }
+            val on = i == active
+            Text(
+                uiString(res).uppercase(),
+                style = if (on) NoopType.headline else NoopType.footnote,
+                color = if (on) runnerSynthesisColor(score) else Palette.textTertiary,
+                fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.Bold else null,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+/** Fork (Rick): the Synthesis card is replaced by the Charge scale under the rings. */
 private const val RUNNER_SHOW_SYNTHESIS_CARD = false
 
 /** Fork (Rick): Synthesis word colour, red (Depleted) through yellow (Steady) to green (Push). */
