@@ -1,0 +1,697 @@
+diff --git a/android/app/src/main/java/com/noop/analytics/AnalyticsEngine.kt b/android/app/src/main/java/com/noop/analytics/AnalyticsEngine.kt
+index 1f97096..fe92922 100644
+--- a/android/app/src/main/java/com/noop/analytics/AnalyticsEngine.kt
++++ b/android/app/src/main/java/com/noop/analytics/AnalyticsEngine.kt
+@@ -484,11 +484,11 @@ object AnalyticsEngine {
+         // night-window stream the caller passed for the rest of this analysis; the pass self-gates on its
+         // observed density, so an empty/sparse `steps` (e.g. a WHOOP 4.0, which never emits a step sample
+         // at all) is a no-op regardless of `useMotionAwareWake`.
+-        val refinedSessions = if (useMotionAwareWake) {
++        val refinedSessions = (if (useMotionAwareWake) {
+             detectedSessions.map { WakeMotionRefinement.refine(it, gravity, steps) }
+         } else {
+             detectedSessions
+-        }
++        }).map { com.noop.intervals.GetUpTrim.trim(it, hr, steps) } // Fork (Rick): end the night at a get-up
+         // #804 Fix A: fold in the caller's device-provided hypnogram (see [providedSleep]). Empty = the
+         // byte-identical motion-only path. Otherwise enrich each provided session's nightly restingHR/avgHRV
+         // from THIS day's hr/rr over its window (the stored ring row carries neither), using the SAME helpers
+@@ -1767,6 +1767,8 @@ object RestScorer {
+      * Swift `AnalyticsEngine.Rest.composite(daily:)`.
+      */
+     fun restFromDaily(daily: DailyMetric, consistency: Double? = null): Double? {
++        // Fork (Rick): NOOP Runner's Rest (adds a Disturbances part) for nights computed on the phone.
++        com.noop.intervals.RunnerRest.score(daily, consistency)?.let { return it }
+         val tstMin = daily.totalSleepMin ?: return null
+         val eff = daily.efficiency ?: return null
+         if (tstMin <= 0.0) return null
+diff --git a/android/app/src/main/java/com/noop/intervals/RunnerSleep.kt b/android/app/src/main/java/com/noop/intervals/RunnerSleep.kt
+new file mode 100644
+index 0000000..cf6c711
+--- /dev/null
++++ b/android/app/src/main/java/com/noop/intervals/RunnerSleep.kt
+@@ -0,0 +1,231 @@
++package com.noop.intervals
++
++import com.noop.analytics.DetectedSleep
++import com.noop.analytics.SleepStager
++import com.noop.analytics.StageSegment
++import com.noop.data.DailyMetric
++import com.noop.data.HrSample
++import com.noop.data.StepSample
++import org.json.JSONArray
++import kotlin.math.max
++import kotlin.math.min
++import kotlin.math.roundToInt
++
++/**
++ * Fork addition (Rick): end the night when you get up.
++ *
++ * NOOP finds sleep mostly from wrist stillness, and a still run only has to keep heart rate under the
++ * day's median. Sitting quietly after getting up (coffee, phone, reading) passes both, so a 4:45 get-up
++ * could be recorded as sleep until 6:41, often staged as REM because heart rate is up while the wrist is
++ * still. This post-pass looks for the first stretch of walking (the strap's step counter, 2 minutes in a
++ * row at 10+ steps a minute, or one minute at 40+) after which heart rate never settles back to sleeping
++ * levels for 30 minutes in a row. The night then ends at that walk. A bathroom trip followed by more
++ * sleep is left alone, because heart rate drops back to the sleeping band afterwards.
++ *
++ * Needs step records (WHOOP 5.0 / MG). Without them it changes nothing. Pure; unit-tested.
++ * No backslash escapes in this file on purpose (it travels through a JSON push).
++ */
++object GetUpTrim {
++    const val WALK_TICKS_PER_MIN = 10
++    const val WALK_SUSTAIN_MIN = 2
++    const val SINGLE_MINUTE_TICKS = 40
++    /** Back-to-sleep proof: this many minutes in a row at sleeping heart rate with no walking. */
++    const val BACK_TO_SLEEP_MIN = 30
++    /** Sleeping band: the night's lowest 5-minute heart rate x 1.15, and at least +8 bpm. */
++    const val BAND_MULT = 1.15
++    const val BAND_MIN_BPM = 8
++    /** Only walks at least this long after the night started, and this long before its recorded end. */
++    const val MIN_SLEEP_BEFORE_MIN = 60
++    const val MIN_TAIL_MIN = 10
++    /** The tail must have heart rate for at least half its minutes, or it is not judged. */
++    const val MIN_TAIL_HR_COVERAGE = 0.5
++
++    /** Steps per minute, counting walk / run records and records whose activity class is unknown. */
++    fun ticksPerMinute(steps: List<StepSample>): Map<Long, Int> {
++        val sorted = steps.sortedBy { it.ts }
++        if (sorted.size < 2) return emptyMap()
++        val out = HashMap<Long, Int>()
++        for (i in 1 until sorted.size) {
++            val cur = sorted[i]
++            if (cur.activityClass == 0) continue
++            val delta = (cur.counter - sorted[i - 1].counter) and 0xFFFF
++            if (delta > 400) continue // a counter reset or gap, not a minute of walking
++            val m = cur.ts / 60
++            out[m] = (out[m] ?: 0) + delta
++        }
++        return out
++    }
++
++    fun hrPerMinute(hr: List<HrSample>, from: Long, to: Long): Map<Long, Double> {
++        val sums = HashMap<Long, Pair<Double, Int>>()
++        for (h in hr) {
++            if (h.ts < from || h.ts >= to || h.bpm !in 25..250) continue
++            val m = h.ts / 60
++            val p = sums[m]
++            sums[m] = if (p == null) h.bpm.toDouble() to 1 else (p.first + h.bpm) to (p.second + 1)
++        }
++        return sums.mapValues { it.value.first / it.value.second }
++    }
++
++    /**
++     * The minute (unix seconds / 60) the night should end at, or null to leave it alone.
++     * [startMin] / [endMin] are the session's first and last minute.
++     */
++    fun getUpMinute(startMin: Long, endMin: Long, restingHr: Int, hrByMin: Map<Long, Double>, ticksByMin: Map<Long, Int>): Long? {
++        if (restingHr <= 0) return null
++        val band = max(restingHr * BAND_MULT, (restingHr + BAND_MIN_BPM).toDouble())
++        fun ticks(m: Long) = ticksByMin[m] ?: 0
++        fun walking(m: Long) = ticks(m) >= SINGLE_MINUTE_TICKS ||
++            (0 until WALK_SUSTAIN_MIN).all { ticks(m + it) >= WALK_TICKS_PER_MIN }
++        var m = startMin + MIN_SLEEP_BEFORE_MIN
++        while (m <= endMin - MIN_TAIL_MIN) {
++            if (walking(m)) {
++                val tail = (m..endMin)
++                val covered = tail.count { hrByMin.containsKey(it) }
++                if (covered >= (endMin - m + 1) * MIN_TAIL_HR_COVERAGE) {
++                    var run = 0
++                    var backToSleep = false
++                    for (t in tail) {
++                        val h = hrByMin[t]
++                        run = if (h != null && h <= band && ticks(t) < WALK_TICKS_PER_MIN) run + 1 else 0
++                        if (run >= BACK_TO_SLEEP_MIN) { backToSleep = true; break }
++                    }
++                    if (!backToSleep) return m
++                }
++            }
++            m++
++        }
++        return null
++    }
++
++    /** The session ended at the get-up, or unchanged. */
++    fun trim(s: DetectedSleep, hr: List<HrSample>, steps: List<StepSample>): DetectedSleep {
++        val rest = s.restingHR ?: return s
++        if (steps.isEmpty() || s.end - s.start < (MIN_SLEEP_BEFORE_MIN + MIN_TAIL_MIN) * 60L) return s
++        val inWindow = steps.filter { it.ts >= s.start && it.ts < s.end }
++        if (inWindow.size < 10) return s
++        val startMin = s.start / 60
++        val endMin = (s.end - 1) / 60
++        val upMin = getUpMinute(startMin, endMin, rest, hrPerMinute(hr, s.start, s.end), ticksPerMinute(inWindow)) ?: return s
++        val newEnd = upMin * 60
++        if (newEnd <= s.start || newEnd >= s.end) return s
++        val stages = s.stages.filter { it.start < newEnd }.map { StageSegment(it.start, min(it.end, newEnd), it.stage) }
++            .filter { it.end > it.start }
++        if (stages.none { it.stage != "wake" }) return s
++        return s.copy(end = newEnd, stages = stages, efficiency = SleepStager.efficiency(s.start, newEnd, stages))
++    }
++}
++
++/**
++ * Fork addition (Rick): the Rest score with a Disturbances part, and its breakdown for the Rest screen.
++ *
++ * NOOP's Rest is 50% duration + 20% efficiency + 20% deep and REM + 10% consistency, so a long night maxes
++ * half the score however broken it was. NOOP Runner scores nights it computed itself as 40% duration
++ * (against 8 hours, as before) + 20% efficiency + 20% deep and REM + 10% consistency + 10% disturbances,
++ * where disturbances is full marks for up to 2 wake-ups and loses 12.5 points for each one after that
++ * (none left at 10). Imported nights (WHOOP CSV, Health Connect, Oura) keep NOOP's formula, because their
++ * "disturbances" field means something else. Pure; unit-tested.
++ */
++object RunnerRest {
++    data class Part(val name: String, val points: Double, val maxPoints: Double, val detail: String)
++
++    const val W_DURATION = 0.40
++    const val W_EFFICIENCY = 0.20
++    const val W_RESTORATIVE = 0.20
++    const val W_CONSISTENCY = 0.10
++    const val W_DISTURBANCES = 0.10
++    const val NEED_HOURS = 8.0
++    const val FREE_WAKEUPS = 2
++    const val POINTS_PER_WAKEUP = 12.5
++
++    /** True for nights NOOP computed on the phone (device id ending in -noop) with a wake-up count. */
++    fun applies(d: DailyMetric): Boolean =
++        d.deviceId.endsWith("-noop") && d.disturbances != null && (d.totalSleepMin ?: 0.0) > 0 && d.efficiency != null
++
++    fun disturbanceScore(wakeUps: Int): Double = (100.0 - POINTS_PER_WAKEUP * max(0, wakeUps - FREE_WAKEUPS)).coerceIn(0.0, 100.0)
++
++    fun parts(d: DailyMetric, consistency: Double? = null): List<Part>? {
++        if (!applies(d)) return null
++        val tstMin = d.totalSleepMin ?: return null
++        val eff = d.efficiency ?: return null
++        val asleepS = tstMin * 60.0
++        val deepS = (d.deepMin ?: 0.0) * 60.0
++        val remS = (d.remMin ?: 0.0) * 60.0
++        val hours = tstMin / 60.0
++        val dur = min(100.0, hours / NEED_HOURS * 100.0)
++        val effS = (eff * 100.0).coerceIn(0.0, 100.0)
++        val share = (deepS + remS) / asleepS
++        val deepAdequacy = ((deepS / asleepS) / 0.13).coerceIn(0.0, 1.0)
++        val deepFactor = 0.5 + 0.5 * deepAdequacy
++        val restor = min(100.0, share / 0.50 * 100.0) * deepFactor
++        val cons = ((consistency ?: 0.5) * 100.0).coerceIn(0.0, 100.0)
++        val wake = d.disturbances ?: 0
++        val dist = disturbanceScore(wake)
++        fun hm(h: Double): String { val t = (h * 60).roundToInt(); return "${t / 60} h ${t % 60} m" }
++        return listOf(
++            Part("Duration", W_DURATION * dur, W_DURATION * 100, "${hm(hours)} asleep against an 8 h target"),
++            Part("Efficiency", W_EFFICIENCY * effS, W_EFFICIENCY * 100, "${effS.roundToInt()}% of your time in bed was asleep"),
++            Part(
++                "Deep and REM", W_RESTORATIVE * restor, W_RESTORATIVE * 100,
++                "${(share * 100).roundToInt()}% of sleep (full marks at 50%, with deep at least 13%)",
++            ),
++            Part(
++                "Consistency", W_CONSISTENCY * cons, W_CONSISTENCY * 100,
++                if (consistency == null) "Not measured yet, so it counts as half" else "How regular your bed and wake times are",
++            ),
++            Part(
++                "Disturbances", W_DISTURBANCES * dist, W_DISTURBANCES * 100,
++                "$wake wake-up${if (wake == 1) "" else "s"} (up to $FREE_WAKEUPS cost nothing)",
++            ),
++        )
++    }
++
++    /** The score, rounded like NOOP's (2 decimals), or null when this formula does not apply. */
++    fun score(d: DailyMetric, consistency: Double? = null): Double? {
++        val p = parts(d, consistency) ?: return null
++        return (p.sumOf { it.points } * 100.0).roundToInt() / 100.0
++    }
++}
++
++/** Fork addition (Rick): small helpers for the Rest screen, read from a night's stored stage timeline. */
++object NightStages {
++    data class Seg(val start: Long, val end: Long, val stage: String)
++
++    /** Segments from a computed night's stagesJSON (segment array); empty for the minute-total format. */
++    fun parse(stagesJson: String?): List<Seg> {
++        val s = stagesJson?.trim() ?: return emptyList()
++        if (!s.startsWith("[")) return emptyList()
++        return runCatching {
++            val a = JSONArray(s)
++            (0 until a.length()).mapNotNull { i ->
++                val o = a.optJSONObject(i) ?: return@mapNotNull null
++                val st = o.optLong("start")
++                val en = o.optLong("end")
++                if (en > st) Seg(st, en, o.optString("stage")) else null
++            }.sortedBy { it.start }
++        }.getOrDefault(emptyList())
++    }
++
++    /** Seconds from getting into bed to the first sleep segment, or null without a timeline. */
++    fun latencySeconds(bedTs: Long, segs: List<Seg>): Long? {
++        val first = segs.firstOrNull { it.stage != "wake" && it.stage != "awake" } ?: return null
++        return max(0L, first.start - bedTs)
++    }
++
++    /** Things worth flagging about a night, in plain words. */
++    fun flags(totalMin: Double, deepMin: Double?, remMin: Double?, efficiency: Double?, wakeUps: Int?, hrOnly: Boolean?): List<String> {
++        val out = ArrayList<String>()
++        if (totalMin <= 0) return out
++        val rem = (remMin ?: 0.0) / totalMin
++        val deep = (deepMin ?: 0.0) / totalMin
++        if (rem > 0.30) {
++            out += "REM is high (${(rem * 100).roundToInt()}%; most adults get 20 to 25%). Quiet time awake, like " +
++                "sitting still after getting up, can be scored as REM. If your wake time looks late, fix it in the Sleep tab."
++        }
++        if (deep < 0.10 && (deepMin ?: 0.0) > 0) out += "Deep sleep is low (${(deep * 100).roundToInt()}%; most adults get 13 to 23%)."
++        if (efficiency != null && efficiency < 0.85) out += "You were awake for more than 15% of your time in bed."
++        if (wakeUps != null && wakeUps >= 6) out += "$wakeUps wake-ups is a broken night, even if the total time looks fine."
++        if (hrOnly == true) out += "This night was staged from heart rate alone (no movement data), so the stages are rougher."
++        return out
++    }
++}
+diff --git a/android/app/src/main/java/com/noop/ui/AppChangelog.kt b/android/app/src/main/java/com/noop/ui/AppChangelog.kt
+index 4d756ae..21fd95a 100644
+--- a/android/app/src/main/java/com/noop/ui/AppChangelog.kt
++++ b/android/app/src/main/java/com/noop/ui/AppChangelog.kt
+@@ -40,7 +40,7 @@ object AppChangelog {
+         // Fork (Rick): what NOOP Runner adds, and how its numbers are worked out. Not a version bump, so the
+         // sheet does not pop up by itself; it sits at the top of Settings > What's new.
+         Release(
+-            version = "Runner build 11",
++            version = "Runner build 12",
+             title = "NOOP Runner: running features and how they are calculated",
+             date = "November 2026",
+             items = listOf(
+@@ -53,6 +53,7 @@ object AppChangelog {
+                 "Set up NOOP Runner. New users see a short checklist on Today (profile, shoes, heart rate, indoor track, Strava, chest strap) until it is done or hidden.",
+                 "Easier buttons mid-run. Pause and End are bigger, with bold white text and an icon each. Delete is a small link at the bottom of the screen and always asks 'Are you sure you want to delete your progress?', with Keep going as the big button.",
+                 "Heart-rate alert. Set a ceiling (stay below a bpm or the top of a zone), a floor (stay above a bpm or the bottom of a zone), or both for a range; Stay in zone sets both from one zone. Over the ceiling for 15 seconds you hear Slow down with two short buzzes; under the floor for 30 seconds you hear Pick it up with one long buzz, and it repeats at most once a minute. The floor stays quiet for the warm-up (5 minutes, adjustable), during interval rest and walk steps and while paused. Each workout shows its time in range, above and below. A target average is read out every 10 minutes. Start a workout > HR alert.",
++                "Rest that matches your night. Tap Rest on Today to see the score broken into its parts, last night's bed and wake times, light, deep and REM with typical ranges, time awake, wake-ups, time to fall asleep, lowest heart rate and HRV, and a note when something looks off (like REM over 30%); History keeps the trend. Nights scored on your phone now count wake-ups: Rest is duration 40 (against 8 hours), efficiency 20, deep and REM 20, consistency 10 and disturbances 10 (full marks up to 2 wake-ups, 12.5 points off for each one after). Imported nights keep the original formula. With a WHOOP 5.0 or MG, the night now ends when you start walking and your heart rate does not settle back to sleeping levels, so sitting quietly after getting up is no longer counted as sleep.",
+                 "Calories from distance. Runs and walks with a distance are costed with the ACSM running and walking equations: about 1 kcal per kg per km running and half that walking, whatever the pace. With intervals, each step is costed as a run or a walk, so walk breaks are not counted at running cost. Climbing adds ACSM's grade term (0.9 ml/kg per metre climbed running, 1.8 walking); descents are not credited. Workouts without a distance use heart rate (Keytel).",
+                 "Elevation gain. GPS workouts record how much you climbed, from the phone's barometer when it has one, otherwise from GPS altitude. Readings are smoothed and a climb only counts once it rises past a small threshold (2 m barometer, 5 m GPS), so sensor noise on flat ground adds nothing. Shown on the workout and used for calories.",
+                 "Smoother GPS distance. Each GPS fix is averaged with the two before it, and distance only builds once you have moved 4 m from the last counted point. Standing at a light or walking a break no longer adds distance from GPS wobble, which keeps distance, pace, splits, calories and shoe miles honest. The route map is left as recorded.",
+@@ -62,7 +63,7 @@ object AppChangelog {
+                 "Health Connect. Workouts share their interval segments or track laps, and active calories, as well as distance and heart rate. GPS routes are not shared.",
+                 "Indigo theme and a runner's Today. An Indigo preset with a ribbed dark backdrop and hex entry for any accent; Today has a Start workout card, and the finished workout opens when you press End.",
+                 "Each workout says how it was worked out. Workouts recorded in NOOP Runner list where their distance, calories and zones came from, in a How these numbers were worked out section.",
+-                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.11), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
++                "Version and updates. The version in About ends in the NOOP Runner build number (for example 12.1.0-runner.12), and Check for updates compares it with the newest NOOP Runner build on GitHub rather than with the original NOOP.",
+             ),
+         ),
+         Release(
+diff --git a/android/app/src/main/java/com/noop/ui/AppRoot.kt b/android/app/src/main/java/com/noop/ui/AppRoot.kt
+index 1dedcbf..e026af4 100644
+--- a/android/app/src/main/java/com/noop/ui/AppRoot.kt
++++ b/android/app/src/main/java/com/noop/ui/AppRoot.kt
+@@ -744,10 +744,16 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
+                     )
+                 }
+                 composable(Destination.VitalSignsDetail.route) { backStackEntry ->
+-                    VitalDetailScreen(
+-                        vm = viewModel,
+-                        key = backStackEntry.arguments?.getString("key").orEmpty(),
+-                    )
++                    val vitalKey = backStackEntry.arguments?.getString("key").orEmpty()
++                    if (vitalKey == HERO_REST_METRIC_KEY) {
++                        // Fork (Rick): Rest opens the score breakdown and last night's details.
++                        RunnerRestScreen(viewModel, onOpenSleep = { nav.navigateTopLevel(Destination.Sleep.route) })
++                    } else {
++                        VitalDetailScreen(
++                            vm = viewModel,
++                            key = vitalKey,
++                        )
++                    }
+                 }
+                 // --- v5 pillar screens (Wave 3 wiring) ---
+                 composable(Destination.InsightsHub.route) { InsightsHubScreen(viewModel) }
+diff --git a/android/app/src/main/java/com/noop/ui/HowNoopWorksScreen.kt b/android/app/src/main/java/com/noop/ui/HowNoopWorksScreen.kt
+index 7599490..370c1ef 100644
+--- a/android/app/src/main/java/com/noop/ui/HowNoopWorksScreen.kt
++++ b/android/app/src/main/java/com/noop/ui/HowNoopWorksScreen.kt
+@@ -70,7 +70,8 @@ private enum class PrimerSection(
+         title = uiString(R.string.l10n_how_noop_works_screen_how_your_sleep_is_sorted_6a8e82e0),
+         body = "NOOP picks your main sleep as your longest real block, and (once it has " +
+             "learned your usual hours) the one nearest your normal sleep time. Everything " +
+-            "else that day is a nap. You can always edit bed and wake times.",
++            "else that day is a nap. NOOP Runner also ends the night when your strap sees you walking and " +
++            "your heart rate does not settle back to sleeping levels. You can always edit bed and wake times.",
+         icon = Icons.Filled.Bedtime,
+     ),
+     SCORES(
+diff --git a/android/app/src/main/java/com/noop/ui/RunnerRestScreen.kt b/android/app/src/main/java/com/noop/ui/RunnerRestScreen.kt
+new file mode 100644
+index 0000000..bd32b00
+--- /dev/null
++++ b/android/app/src/main/java/com/noop/ui/RunnerRestScreen.kt
+@@ -0,0 +1,225 @@
++package com.noop.ui
++
++import androidx.compose.foundation.background
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material3.Button
++import androidx.compose.material3.OutlinedButton
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableIntStateOf
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import com.noop.analytics.AnalyticsEngine
++import com.noop.analytics.RestScorer
++import com.noop.data.SleepSession
++import com.noop.data.WhoopRepository
++import com.noop.intervals.NightStages
++import com.noop.intervals.RunnerRest
++import java.text.DateFormat
++import java.util.Date
++import kotlin.math.roundToInt
++
++// Fork addition (Rick): what tapping the Rest ring opens. Last night's score broken into its parts, the
++// night's numbers (times, stages with typical ranges, wake-ups, heart rate), plain flags when something
++// looks off, and a History tab with NOOP's original Rest trend.
++
++private fun hm(minutes: Double): String {
++    val t = minutes.roundToInt()
++    return if (t >= 60) "${t / 60} h ${t % 60} m" else "$t m"
++}
++
++private fun clock(ts: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(ts * 1000))
++
++@Composable
++internal fun RunnerRestScreen(vm: AppViewModel, onOpenSleep: () -> Unit) {
++    var tab by remember { mutableIntStateOf(0) }
++    Column(Modifier.fillMaxSize()) {
++        Row(
++            horizontalArrangement = Arrangement.spacedBy(8.dp),
++            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
++        ) {
++            listOf("Last night", "History").forEachIndexed { i, label ->
++                if (tab == i) Button(onClick = { tab = i }) { Text(label) }
++                else OutlinedButton(onClick = { tab = i }) { Text(label) }
++            }
++        }
++        if (tab == 1) {
++            Box(Modifier.weight(1f)) { VitalDetailScreen(vm = vm, key = "rest") }
++        } else {
++            Box(Modifier.weight(1f)) { RestLastNight(vm, onOpenSleep) }
++        }
++    }
++}
++
++@Composable
++private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
++    val days by vm.recentDays.collectAsStateWithLifecycle()
++    val night = remember(days) { days.filter { (it.totalSleepMin ?: 0.0) > 0 }.maxByOrNull { it.day } }
++    var sessions by remember { mutableStateOf<List<SleepSession>>(emptyList()) }
++    LaunchedEffect(days, night?.day) {
++        val day = night?.day ?: return@LaunchedEffect
++        sessions = runCatching {
++            val strap = vm.activeStrapId
++            val now = System.currentTimeMillis() / 1000L
++            val from = now - 3 * 86_400L
++            fun localEndDay(s: SleepSession): String {
++                val off = (java.util.TimeZone.getDefault().getOffset(s.endTs * 1000) / 1000).toLong()
++                return AnalyticsEngine.dayString(s.endTs, off)
++            }
++            WhoopRepository.mergeSleepRichness(
++                vm.repo.sleepSessionsUnion(strap, from, now),
++                vm.repo.computedSleepSessionsUnion(strap, from, now),
++            ) { localEndDay(it) }.filter { localEndDay(it) == day }.sortedBy { it.effectiveStartTs }
++        }.getOrDefault(emptyList())
++    }
++
++    Column(
++        verticalArrangement = Arrangement.spacedBy(12.dp),
++        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
++    ) {
++        if (night == null) {
++            NoopCard { Text("No scored night yet. Wear your strap to bed and Rest appears here in the morning.", style = NoopType.body, color = Palette.textSecondary) }
++            return@Column
++        }
++        val total = night.totalSleepMin ?: 0.0
++        val score = RestScorer.restFromDaily(night)
++        val parts = RunnerRest.parts(night)
++        // The night chosen as main sleep: the longest block that day (naps are shown in the Sleep tab).
++        val main = sessions.maxByOrNull { it.endTs - it.effectiveStartTs }
++        val bed = sessions.filter { main == null || it.endTs > main.effectiveStartTs - 3 * 3600 }.minOfOrNull { it.effectiveStartTs }
++        val wake = main?.endTs
++        val inBedMin = if (bed != null && wake != null && wake > bed) (wake - bed) / 60.0 else null
++        val segs = main?.let { NightStages.parse(it.stagesJSON) }.orEmpty()
++
++        // Score
++        NoopCard(tint = Palette.recoveryColor(score ?: 0.0)) {
++            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
++                Text("Rest, night ending ${night.day}", style = NoopType.subhead, color = Palette.textSecondary)
++                Text(score?.roundToInt()?.toString() ?: "-", style = NoopType.headline, color = Palette.textPrimary)
++                if (bed != null && wake != null) {
++                    Text("${clock(bed)} to ${clock(wake)}", style = NoopType.body, color = Palette.textPrimary)
++                }
++                Text(
++                    "Wrong bed or wake time? In the Sleep tab, tap the times to fix them; the stages and score follow.",
++                    style = NoopType.footnote, color = Palette.textTertiary,
++                )
++            }
++        }
++
++        // Breakdown
++        NoopCard {
++            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
++                Text("How the score adds up", style = NoopType.subhead, color = Palette.textPrimary)
++                if (parts == null) {
++                    Text(
++                        "This night came from an import, so it is scored with NOOP's original formula: duration 50, " +
++                            "efficiency 20, deep and REM 20, consistency 10.",
++                        style = NoopType.footnote, color = Palette.textSecondary,
++                    )
++                } else {
++                    parts.forEach { p ->
++                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
++                            Column(Modifier.weight(1f)) {
++                                Text(p.name, style = NoopType.body, color = Palette.textPrimary)
++                                Text(p.detail, style = NoopType.footnote, color = Palette.textTertiary)
++                            }
++                            Text(
++                                "${p.points.roundToInt()} / ${p.maxPoints.roundToInt()}",
++                                style = NoopType.bodyNumber,
++                                color = if (p.points >= p.maxPoints * 0.9) Palette.statusPositive else Palette.textPrimary,
++                            )
++                        }
++                    }
++                    Text(
++                        "These are NOOP Runner's own estimates from your strap, not WHOOP's Sleep Performance.",
++                        style = NoopType.footnote, color = Palette.textTertiary,
++                    )
++                }
++            }
++        }
++
++        // Flags
++        val flags = NightStages.flags(total, night.deepMin, night.remMin, night.efficiency, night.disturbances, night.sleepHrOnly)
++        if (flags.isNotEmpty()) {
++            NoopCard(tint = Palette.statusWarning) {
++                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
++                    Text("Worth a look", style = NoopType.subhead, color = Palette.statusWarning)
++                    flags.forEach { Text(it, style = NoopType.footnote, color = Palette.textPrimary) }
++                }
++            }
++        }
++
++        // Stages
++        NoopCard {
++            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
++                Text("Sleep stages", style = NoopType.subhead, color = Palette.textPrimary)
++                StageRow("Light", night.lightMin, total, "45 to 55%", Palette.textSecondary)
++                StageRow("Deep", night.deepMin, total, "13 to 23%", Palette.accent)
++                StageRow("REM", night.remMin, total, "20 to 25%", Palette.statusPositive)
++                Text("Typical ranges are for healthy adults; they shift with age.", style = NoopType.footnote, color = Palette.textTertiary)
++            }
++        }
++
++        // The night's numbers
++        NoopCard {
++            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
++                Text("Last night", style = NoopType.subhead, color = Palette.textPrimary)
++                if (inBedMin != null) InfoRow("In bed", hm(inBedMin))
++                InfoRow("Asleep", hm(total))
++                if (inBedMin != null && inBedMin > total) InfoRow("Awake in bed", hm(inBedMin - total))
++                if (main != null) NightStages.latencySeconds(main.effectiveStartTs, segs)?.let { InfoRow("Time to fall asleep", hm(it / 60.0)) }
++                night.disturbances?.let { InfoRow("Wake-ups", it.toString()) }
++                night.restingHr?.let { InfoRow("Lowest heart rate", "$it bpm") }
++                night.avgHrv?.let { InfoRow("HRV (average)", "${it.roundToInt()} ms") }
++                night.respRateBpm?.let { InfoRow("Breathing rate", "${"%.1f".format(it)} per min") }
++                night.skinTempDevC?.let { InfoRow("Skin temperature", "${if (it >= 0) "+" else ""}${"%.1f".format(it)} C from your normal") }
++            }
++        }
++
++        Button(onClick = onOpenSleep, modifier = Modifier.fillMaxWidth()) { Text("Open the Sleep tab (timeline and edits)") }
++        Spacer(Modifier.height(24.dp))
++    }
++}
++
++@Composable
++private fun StageRow(name: String, minutes: Double?, total: Double, typical: String, color: androidx.compose.ui.graphics.Color) {
++    val m = minutes ?: 0.0
++    val pct = if (total > 0) m / total else 0.0
++    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
++        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
++            Text(name, style = NoopType.body, color = Palette.textPrimary, modifier = Modifier.width(64.dp))
++            Text("${hm(m)}  ${(pct * 100).roundToInt()}%", style = NoopType.bodyNumber, color = Palette.textPrimary, modifier = Modifier.weight(1f))
++            Text("typical $typical", style = NoopType.footnote, color = Palette.textTertiary)
++        }
++        Box(Modifier.fillMaxWidth().height(6.dp).background(Palette.surfaceInset, RoundedCornerShape(3.dp))) {
++            Box(Modifier.fillMaxWidth(pct.toFloat().coerceIn(0f, 1f)).height(6.dp).background(color, RoundedCornerShape(3.dp)))
++        }
++    }
++}
++
++@Composable
++private fun InfoRow(label: String, value: String) {
++    Row(modifier = Modifier.fillMaxWidth()) {
++        Text(label, style = NoopType.body, color = Palette.textSecondary, modifier = Modifier.weight(1f))
++        Text(value, style = NoopType.bodyNumber, color = Palette.textPrimary)
++    }
++}
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index 5ae9793..8d5c17f 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -1907,7 +1907,7 @@
+     <string name="explore_metric_mood">Mood</string>
+     <string name="explore_description_charge">How recovered you are, led by HRV versus your personal baseline.</string>
+     <string name="explore_description_effort">Cardiovascular load for the day, on a 0-100 scale (was 0-21).</string>
+-    <string name="explore_description_rest">How restorative your sleep was: duration, efficiency, deep+REM, timing.</string>
++    <string name="explore_description_rest">How restorative your sleep was: duration, efficiency, deep+REM, timing, wake-ups.</string>
+     <string name="l10n_workouts_screen_heart_rate_recovery_516">Heart Rate Recovery</string>
+     <string name="l10n_workouts_screen_after_high_intensity_effort_516">After high-intensity effort</string>
+     <string name="l10n_workouts_screen_peak_hr_bpm_516">Peak %1$d bpm</string>
+@@ -2616,7 +2616,7 @@
+     <string name="scoring_guide_effort_body">Effort measures cardiovascular load. Heart rate is converted into a training impulse using heart-rate-reserve zones, with harder zones weighted more heavily, then mapped to a logarithmic 0–100 scale. Steps and active energy provide a floor for long, low-cardio activity.</string>
+     <string name="scoring_guide_effort_vs_whoop">The idea is similar to WHOOP’s Day Strain (0–21), rescaled to 0–100. A 100 remains as rare as a 21.0.</string>
+     <string name="scoring_guide_rest_headline">Rest: how restorative was your sleep?</string>
+-    <string name="scoring_guide_rest_body">Rest combines sleep duration versus your need, sleep efficiency, restorative deep and REM sleep, and the consistency of sleep and wake times.</string>
++    <string name="scoring_guide_rest_body">Rest combines sleep duration versus your need (40 points), sleep efficiency (20), restorative deep and REM sleep (20), the consistency of sleep and wake times (10) and how often you woke up (10). Tap Rest on Today to see how last night adds up.</string>
+     <string name="scoring_guide_rest_vs_whoop">The idea is similar to WHOOP’s Sleep Performance %, but our calculation is independent.</string>
+     <string name="scoring_guide_solid">Solid</string>
+     <string name="scoring_guide_building">Building</string>
+diff --git a/android/app/src/test/java/com/noop/intervals/RunnerSleepTest.kt b/android/app/src/test/java/com/noop/intervals/RunnerSleepTest.kt
+new file mode 100644
+index 0000000..87c68a9
+--- /dev/null
++++ b/android/app/src/test/java/com/noop/intervals/RunnerSleepTest.kt
+@@ -0,0 +1,98 @@
++package com.noop.intervals
++
++import com.noop.data.DailyMetric
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class RunnerSleepTest {
++
++    // A night from minute 0 to 600 (10 h). Sleeping HR 50 (band = 58), awake HR 70.
++    private fun hr(vararg spans: Triple<Int, Int, Double>): Map<Long, Double> {
++        val m = HashMap<Long, Double>()
++        for ((a, b, v) in spans) for (t in a..b) m[t.toLong()] = v
++        return m
++    }
++
++    private fun walk(vararg minutes: Int): Map<Long, Int> = minutes.associate { it.toLong() to 25 }
++
++    @Test fun getUpWithoutReturnToSleep_endsTheNight() {
++        // Asleep until 470, walks at 470-471, then sits awake at HR 70 until 600.
++        val h = hr(Triple(0, 469, 50.0), Triple(470, 600, 70.0))
++        assertEquals(470L, GetUpTrim.getUpMinute(0, 600, 50, h, walk(470, 471)))
++    }
++
++    @Test fun bathroomTripThenSleep_isKept() {
++        // Walk at 200-201, HR back to 50 from 205 for the rest of the night.
++        val h = hr(Triple(0, 199, 50.0), Triple(200, 204, 70.0), Triple(205, 600, 50.0))
++        assertNull(GetUpTrim.getUpMinute(0, 600, 50, h, walk(200, 201)))
++    }
++
++    @Test fun earliestQualifyingWalkWins() {
++        // A bathroom trip at 200 (back to sleep), then the real get-up at 470 with more walking at 520.
++        val h = hr(Triple(0, 199, 50.0), Triple(200, 204, 70.0), Triple(205, 469, 50.0), Triple(470, 600, 72.0))
++        assertEquals(470L, GetUpTrim.getUpMinute(0, 600, 50, h, walk(200, 201, 470, 471, 520, 521)))
++    }
++
++    @Test fun singleTurnOverMinute_isNotAWalk() {
++        val h = hr(Triple(0, 469, 50.0), Triple(470, 600, 70.0))
++        assertNull(GetUpTrim.getUpMinute(0, 600, 50, h, mapOf(470L to 25)))
++    }
++
++    @Test fun walkTooEarlyOrTooLate_isIgnored() {
++        val h = hr(Triple(0, 600, 70.0))
++        assertNull(GetUpTrim.getUpMinute(0, 600, 50, h, walk(30, 31)))
++        assertNull(GetUpTrim.getUpMinute(0, 600, 50, h, walk(595, 596)))
++    }
++
++    @Test fun noHeartRateInTail_isNotJudged() {
++        val h = hr(Triple(0, 469, 50.0))
++        assertNull(GetUpTrim.getUpMinute(0, 600, 50, h, walk(470, 471)))
++    }
++
++    private fun night(id: String, wake: Int?, totalMin: Double = 480.0) = DailyMetric(
++        deviceId = id, day = "2026-11-26", totalSleepMin = totalMin, efficiency = 0.90,
++        deepMin = 80.0, remMin = 160.0, lightMin = 240.0, disturbances = wake,
++    )
++
++    @Test fun disturbanceScale() {
++        assertEquals(100.0, RunnerRest.disturbanceScore(0), 1e-9)
++        assertEquals(100.0, RunnerRest.disturbanceScore(2), 1e-9)
++        assertEquals(87.5, RunnerRest.disturbanceScore(3), 1e-9)
++        assertEquals(50.0, RunnerRest.disturbanceScore(6), 1e-9)
++        assertEquals(0.0, RunnerRest.disturbanceScore(10), 1e-9)
++        assertEquals(0.0, RunnerRest.disturbanceScore(14), 1e-9)
++    }
++
++    @Test fun onlyPhoneScoredNightsUseTheNewFormula() {
++        assertNotNull(RunnerRest.score(night("my-whoop-noop", 2)))
++        assertNull(RunnerRest.score(night("my-whoop", 2)))
++        assertNull(RunnerRest.score(night("my-whoop-noop", null)))
++    }
++
++    @Test fun scoreAddsUp() {
++        // 8 h -> 40, efficiency 90% -> 18, deep+REM 50% with deep 16.7% -> 20, consistency neutral -> 5,
++        // 2 wake-ups -> 10. Total 93.
++        assertEquals(93.0, RunnerRest.score(night("my-whoop-noop", 2))!!, 1e-6)
++        // 6 wake-ups -> disturbances 5 instead of 10.
++        assertEquals(88.0, RunnerRest.score(night("my-whoop-noop", 6))!!, 1e-6)
++        val parts = RunnerRest.parts(night("my-whoop-noop", 2))!!
++        assertEquals(5, parts.size)
++        assertEquals(100.0, parts.sumOf { it.maxPoints }, 1e-9)
++    }
++
++    @Test fun flagsHighRem() {
++        val f = NightStages.flags(532.0, 86.0, 180.0, 0.90, 3, false)
++        assertTrue(f.any { it.startsWith("REM is high (34%") })
++    }
++
++    @Test fun parsesSegmentsAndLatency() {
++        val json = """[{"start":1000,"end":1600,"stage":"wake"},{"start":1600,"end":5000,"stage":"light"}]"""
++        val segs = NightStages.parse(json)
++        assertEquals(2, segs.size)
++        assertEquals(600L, NightStages.latencySeconds(1000, segs))
++        assertEquals(0, NightStages.parse("""{"light":200}""").size)
++    }
++}
+diff --git a/fork-version.txt b/fork-version.txt
+index b4de394..48082f7 100644
+--- a/fork-version.txt
++++ b/fork-version.txt
+@@ -1 +1 @@
+-11
++12
