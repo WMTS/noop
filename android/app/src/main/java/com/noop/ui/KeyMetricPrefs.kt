@@ -36,7 +36,9 @@ enum class KeyMetric(val raw: String, @StringRes val titleRes: Int) {
     // DashboardCard.SKIN_TEMP's own title resource rather than adding a new one. New case, NOT added
     // to defaultOrder below, so an existing user's saved layout (and a fresh install's default) is
     // byte-identical to before; only opts in via the layout editor.
-    SKIN_TEMP("skinTemp", R.string.today_card_skin_temp);
+    SKIN_TEMP("skinTemp", R.string.today_card_skin_temp),
+    // Fork (Rick): the estimated VO2 max NOOP already computes ("Your Cards" VO2 Max), as a Key Metric.
+    VO2MAX("vo2max", R.string.today_card_vo2max);
 
     companion object {
         fun fromRaw(raw: String?): KeyMetric? = entries.firstOrNull { it.raw == raw }
@@ -44,7 +46,7 @@ enum class KeyMetric(val raw: String, @StringRes val titleRes: Int) {
         /** The original, hard-coded grid order — the default when the layout isn't customised. */
         val defaultOrder: List<KeyMetric> = listOf(
             CHARGE, EFFORT, REST, HRV, RESTING_HR,
-            BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
+            BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES, VO2MAX,
         )
     }
 }
@@ -82,8 +84,23 @@ object KeyMetricPrefs {
     }
 
     /** The enabled tiles in display order. An empty/unset string yields the full default order. */
-    fun enabled(context: Context): List<KeyMetric> =
-        decodeEnabled(NoopPrefs.of(context).getString(KEY_LAYOUT, null))
+    fun enabled(context: Context): List<KeyMetric> {
+        val prefs = NoopPrefs.of(context)
+        // Fork (Rick): add the new VO2 max tile once to a layout saved before it existed; after that the
+        // editor decides (removing it there sticks).
+        if (!prefs.getBoolean(KEY_FORK_VO2_ADDED, false)) {
+            val saved = prefs.getString(KEY_LAYOUT, null)
+            val edit = prefs.edit().putBoolean(KEY_FORK_VO2_ADDED, true)
+            if (!saved.isNullOrBlank()) {
+                val list = decodeEnabled(saved)
+                if (KeyMetric.VO2MAX !in list) edit.putString(KEY_LAYOUT, encode(list + KeyMetric.VO2MAX))
+            }
+            edit.apply()
+        }
+        return decodeEnabled(prefs.getString(KEY_LAYOUT, null))
+    }
+
+    private const val KEY_FORK_VO2_ADDED = "fork.keyMetricsVo2Added"
 
     /** Persist the enabled tiles in order. Disabled tiles are simply omitted from the stored string. */
     fun setEnabled(context: Context, metrics: List<KeyMetric>) {

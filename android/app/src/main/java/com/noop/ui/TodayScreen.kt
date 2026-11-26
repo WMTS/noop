@@ -1838,6 +1838,7 @@ fun TodayScreen(
                                     stepsCalibrationPrompt = stepsCalibrationPrompt(context, profileStore),
                                     restScore = restScoreForDay,
                                     restSpark = restCompositeSpark,
+                                    vo2max = vo2maxToday, // Fork (Rick)
                                     enabledMetrics = enabledKeyMetrics,
                                     isToday = selectedDayOffset == 0,
                                     // #1164: today's Rest is provisional while the strap has banked records
@@ -5971,6 +5972,8 @@ private fun MetricGrid(
     // mini-graph tracks the Rest SCORE rather than raw sleep minutes (#614 follow-up). Other tiles still
     // read their series off `w` (the DailyMetric windows).
     restSpark: List<Double> = emptyList(),
+    // Fork (Rick): estimated VO2 max for the VO2 max tile (ml/kg/min), or null.
+    vo2max: Double? = null,
     enabledMetrics: List<KeyMetric> = KeyMetric.defaultOrder,
     isToday: Boolean = false,
     // #1164: today's Rest is provisional while the strap has banked records not yet offloaded — the Rest
@@ -6151,6 +6154,15 @@ private fun MetricGrid(
                 spark = caloriesSpark,   // #616: imported-first trend (was missing → no trend line)
             )
         },
+        // Fork (Rick): estimated VO2 max (the same "vo2max_est" value as the VO2 Max card), ml/kg/min.
+        KeyMetric.VO2MAX to KeyTileData(
+            label = "Est. VO2 max",
+            value = vo2max?.let { "${it.roundToInt()}" } ?: NO_DATA,
+            unit = if (vo2max != null) "ml/kg/min" else "",
+            tint = Palette.chargeColor,
+            // Bar spans 20 to 60 ml/kg/min, roughly poor to excellent for adults.
+            frac = vo2max?.let { ((it - 20.0) / 40.0).coerceIn(0.0, 1.0) },
+        ),
         KeyMetric.SKIN_TEMP to run {
             // Added 2026-08-24 (queue 11c follow-up): first Key Metrics appearance for Skin Temp — was
             // already a "Your Cards" tile (DashboardCard.SKIN_TEMP), never a Key Metrics one. Same
@@ -6198,10 +6210,12 @@ private fun MetricGrid(
         // to — confirmed a working destination there, so this tile opens the SAME screen "Your Cards"
         // already does, not a new/unverified route.
         KeyMetric.SKIN_TEMP -> ({ onOpenMetric("skin") })
+        KeyMetric.VO2MAX -> ({ onOpenMetric("vo2max_est") }) // Fork (Rick): same detail as the VO2 Max card
     }
     // S5: slice from the FRONT of the saved order so a pinned/selected tile is never dropped or reordered
     // (#251); only the tail folds behind the expander. Mirrors the iOS visibleKeyMetrics prefix(cap).
-    val hasOverflow = allTiles.size > METRICS_COLLAPSED_CAP
+    // Fork (Rick): always show every enabled tile; the Edit button already chooses which ones show.
+    val hasOverflow = false
     val tiles = if (metricsExpanded || !hasOverflow) allTiles else allTiles.take(METRICS_COLLAPSED_CAP)
 
     // iOS `keyMetricsSection` LazyVGrid: 3 columns, spacing 8. Build from rows so tile heights tile uniformly
@@ -6295,6 +6309,7 @@ private fun keyMetricIcon(metric: KeyMetric): ImageVector = when (metric) {
     KeyMetric.CALORIES -> Icons.Filled.LocalFireDepartment
     // Same glyph the sibling "Your Cards" tile (DashboardCard.SKIN_TEMP) already uses.
     KeyMetric.SKIN_TEMP -> Icons.Filled.Thermostat
+    KeyMetric.VO2MAX -> Icons.Filled.Air // Fork (Rick)
 }
 
 /**
