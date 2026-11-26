@@ -76,7 +76,7 @@ private enum class PrimerSection(
     ),
     SCORES(
         title = uiString(R.string.l10n_how_noop_works_screen_how_your_scores_work_21a0e2be),
-        body = "Charge, Effort and Rest are scored on your own device from your strap data. " +
+        body = "Charge, Effort and Sleep (the Rest score in some screens) are scored on your own device from your strap data. " +
             "Charge needs about four nights of sleep to learn your baseline (that's \"Calibrating\", " +
             "counted as nights of 4 on the ring), and keeps sharpening over your first couple of weeks. " +
             "On a WHOOP 5 or MG the strap banks little history, so that count can sit at 0 of 4 until you " +

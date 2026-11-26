@@ -723,6 +723,8 @@ fun SleepScreen(
                     overline = nightLabel,
                 )
             }
+            // Fork (Rick): how the score adds up, flags, stages vs typical ranges and the night's numbers.
+            item { RunnerNightCards(vm, night?.dayKey, showScore = false) }
             item { SleepAlarmsEntry(onOpenAlarms) }
             // #sleep-layout: a compact "Arrange" affordance (the same Tune entry Today uses) opens the
             // reorder / show-hide sheet. Pinned just above the arrangeable cards.

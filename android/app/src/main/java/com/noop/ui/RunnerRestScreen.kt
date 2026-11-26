@@ -38,7 +38,8 @@ import java.text.DateFormat
 import java.util.Date
 import kotlin.math.roundToInt
 
-// Fork addition (Rick): what tapping the Rest ring opens. Last night's score broken into its parts, the
+// Fork addition (Rick): last night's sleep in detail. The cards sit on the Sleep tab under the score (which
+// the Sleep ring on Today opens); RunnerRestScreen keeps them for any other link to the Rest detail. Last night's score broken into its parts, the
 // night's numbers (times, stages with typical ranges, wake-ups, heart rate), plain flags when something
 // looks off, and a History tab with NOOP's original Rest trend.
 
@@ -73,14 +74,35 @@ internal fun RunnerRestScreen(vm: AppViewModel, onOpenSleep: () -> Unit) {
 @Composable
 private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
-    val night = remember(days) { days.filter { (it.totalSleepMin ?: 0.0) > 0 }.maxByOrNull { it.day } }
+    val latest = remember(days) { days.filter { (it.totalSleepMin ?: 0.0) > 0 }.maxByOrNull { it.day }?.day }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        RunnerNightCards(vm, latest, showScore = true)
+        Button(onClick = onOpenSleep, modifier = Modifier.fillMaxWidth()) { Text("Open the Sleep tab (timeline and edits)") }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * The night's cards: score (optional, the Sleep tab has its own), how the score adds up, flags, stages and
+ * the night's numbers. [day] is the night's wake day ("yyyy-MM-dd"); null shows nothing.
+ */
+@Composable
+internal fun RunnerNightCards(vm: AppViewModel, day: String?, showScore: Boolean) {
+    val days by vm.recentDays.collectAsStateWithLifecycle()
+    val night = remember(days, day) { days.firstOrNull { it.day == day && (it.totalSleepMin ?: 0.0) > 0 } }
     var sessions by remember { mutableStateOf<List<SleepSession>>(emptyList()) }
     LaunchedEffect(days, night?.day) {
-        val day = night?.day ?: return@LaunchedEffect
+        val nightDay = night?.day ?: return@LaunchedEffect
         sessions = runCatching {
             val strap = vm.activeStrapId
-            val now = System.currentTimeMillis() / 1000L
-            val from = now - 3 * 86_400L
+            val dayStart = runCatching {
+                java.time.LocalDate.parse(nightDay).atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond()
+            }.getOrDefault(System.currentTimeMillis() / 1000L)
+            val now = dayStart + 2 * 86_400L
+            val from = dayStart - 2 * 86_400L
             fun localEndDay(s: SleepSession): String {
                 val off = (java.util.TimeZone.getDefault().getOffset(s.endTs * 1000) / 1000).toLong()
                 return AnalyticsEngine.dayString(s.endTs, off)
@@ -88,16 +110,13 @@ private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
             WhoopRepository.mergeSleepRichness(
                 vm.repo.sleepSessionsUnion(strap, from, now),
                 vm.repo.computedSleepSessionsUnion(strap, from, now),
-            ) { localEndDay(it) }.filter { localEndDay(it) == day }.sortedBy { it.effectiveStartTs }
+            ) { localEndDay(it) }.filter { localEndDay(it) == nightDay }.sortedBy { it.effectiveStartTs }
         }.getOrDefault(emptyList())
     }
 
-    Column(
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
         if (night == null) {
-            NoopCard { Text("No scored night yet. Wear your strap to bed and Rest appears here in the morning.", style = NoopType.body, color = Palette.textSecondary) }
+            if (showScore) NoopCard { Text("No scored night yet. Wear your strap to bed and your sleep score appears here in the morning.", style = NoopType.body, color = Palette.textSecondary) }
             return@Column
         }
         val total = night.totalSleepMin ?: 0.0
@@ -111,9 +130,9 @@ private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
         val segs = main?.let { NightStages.parse(it.stagesJSON) }.orEmpty()
 
         // Score
-        NoopCard(tint = Palette.recoveryColor(score ?: 0.0)) {
+        if (showScore) NoopCard(tint = Palette.recoveryColor(score ?: 0.0)) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Rest, night ending ${night.day}", style = NoopType.subhead, color = Palette.textSecondary)
+                Text("Sleep score, night ending ${night.day}", style = NoopType.subhead, color = Palette.textSecondary)
                 Text(score?.roundToInt()?.toString() ?: "-", style = NoopType.headline, color = Palette.textPrimary)
                 if (bed != null && wake != null) {
                     Text("${clock(bed)} to ${clock(wake)}", style = NoopType.body, color = Palette.textPrimary)
@@ -194,9 +213,6 @@ private fun RestLastNight(vm: AppViewModel, onOpenSleep: () -> Unit) {
                 night.skinTempDevC?.let { InfoRow("Skin temperature", "${if (it >= 0) "+" else ""}${"%.1f".format(it)} C from your normal") }
             }
         }
-
-        Button(onClick = onOpenSleep, modifier = Modifier.fillMaxWidth()) { Text("Open the Sleep tab (timeline and edits)") }
-        Spacer(Modifier.height(24.dp))
     }
 }
 

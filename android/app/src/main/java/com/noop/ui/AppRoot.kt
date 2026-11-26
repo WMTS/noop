@@ -648,7 +648,11 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         onOpenHealth = { nav.navigate(Destination.Health.route) },
                         // Every metric/vital card opens its OWN focused detail trend (vital_detail/<key>),
                         // not the shared Health hub (2026-07-03). Mirrors the iOS liquidCard metricDetail.
-                        onOpenMetric = { key -> nav.navigate("vital_detail/$key") },
+                        // Fork (Rick): the Sleep (Rest) ring and card open the Sleep tab, which shows last night in detail.
+                        onOpenMetric = { key ->
+                            if (key == HERO_REST_METRIC_KEY) nav.navigateTopLevel(Destination.Sleep.route)
+                            else nav.navigate("vital_detail/$key")
+                        },
                         // A blank, uncalibrated WHOOP 4.0 Steps tile opens the same calibration screen as
                         // Settings. A normal push returns Back to Today (#1515).
                         onOpenStepsCalibration = { nav.navigate(Destination.StepsCalibration.route) },

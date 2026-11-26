@@ -3168,7 +3168,11 @@ private fun ScoreHeroRow(
                         caption = if (restPendingSync) {
                             uiString(R.string.l10n_today_screen_pending_sync_cbe01f9e)
                         } else {
-                            null
+                            // Fork (Rick): hours slept under the Sleep label.
+                            day?.totalSleepMin?.takeIf { it > 0 }?.let { m ->
+                                val t = m.roundToInt()
+                                "${t / 60}h ${t % 60}m"
+                            }
                         },
                     ) {
                         Box(contentAlignment = Alignment.Center) {

@@ -2405,7 +2405,7 @@
     <string name="today_card_coupled_subtitle">Recovery, strain and sleep in one glance</string>
     <string name="today_metric_charge">Charge</string>
     <string name="today_metric_effort">Effort</string>
-    <string name="today_metric_rest">Rest</string>
+    <string name="today_metric_rest">Sleep</string>
     <string name="today_metric_hrv">HRV</string>
     <string name="today_metric_resting_hr">Resting HR</string>
     <string name="today_metric_blood_oxygen">Blood oxygen</string>
@@ -2615,8 +2615,8 @@
     <string name="scoring_guide_effort_headline">Effort: how hard did your heart work?</string>
     <string name="scoring_guide_effort_body">Effort measures cardiovascular load. Heart rate is converted into a training impulse using heart-rate-reserve zones, with harder zones weighted more heavily, then mapped to a logarithmic 0–100 scale. Steps and active energy provide a floor for long, low-cardio activity.</string>
     <string name="scoring_guide_effort_vs_whoop">The idea is similar to WHOOP’s Day Strain (0–21), rescaled to 0–100. A 100 remains as rare as a 21.0.</string>
-    <string name="scoring_guide_rest_headline">Rest: how restorative was your sleep?</string>
-    <string name="scoring_guide_rest_body">Rest combines sleep duration versus your need (40 points), sleep efficiency (20), restorative deep and REM sleep (20), the consistency of sleep and wake times (10) and how often you woke up (10). Tap Rest on Today to see how last night adds up.</string>
+    <string name="scoring_guide_rest_headline">Sleep: how restorative was your sleep?</string>
+    <string name="scoring_guide_rest_body">Rest combines sleep duration versus your need (40 points), sleep efficiency (20), restorative deep and REM sleep (20), the consistency of sleep and wake times (10) and how often you woke up (10). Tap Sleep on Today to see how last night adds up.</string>
     <string name="scoring_guide_rest_vs_whoop">The idea is similar to WHOOP’s Sleep Performance %, but our calculation is independent.</string>
     <string name="scoring_guide_solid">Solid</string>
     <string name="scoring_guide_building">Building</string>
