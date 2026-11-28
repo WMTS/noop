@@ -578,6 +578,13 @@ fun TodayScreen(
     var stressToday by remember { mutableStateOf(viewModel.todayStressCache) }
     var fitnessAgeToday by remember { mutableStateOf(viewModel.todayFitnessAgeCache) }
     var vo2maxToday by remember { mutableStateOf(viewModel.todayVo2maxCache) }
+    // Fork (Rick): the Sleep tab's sleep-debt ledger for the Sleep debt Key Metric (same builder as the Sleep tab).
+    var forkSleepDebt by remember { mutableStateOf<com.noop.analytics.SleepDebtLedger?>(null) }
+    LaunchedEffect(days, viewModel.activeStrapId) {
+        forkSleepDebt = runCatching {
+            withContext(Dispatchers.Default) { buildHostedSleepModel(viewModel.repo, viewModel.activeStrapId, days)?.sleepDebtLedger }
+        }.getOrNull()
+    }
     var vitalityToday by remember { mutableStateOf(viewModel.todayVitalityCache) }
     LaunchedEffect(days) {
         // #849 re-mount guard: skip the whole-history scan when `days` is content-identical to the last load
@@ -1839,6 +1846,7 @@ fun TodayScreen(
                                     restScore = restScoreForDay,
                                     restSpark = restCompositeSpark,
                                     vo2max = vo2maxToday, // Fork (Rick)
+                                    sleepDebt = forkSleepDebt, // Fork (Rick)
                                     enabledMetrics = enabledKeyMetrics,
                                     isToday = selectedDayOffset == 0,
                                     // #1164: today's Rest is provisional while the strap has banked records
@@ -5981,6 +5989,8 @@ private fun MetricGrid(
     restSpark: List<Double> = emptyList(),
     // Fork (Rick): estimated VO2 max for the VO2 max tile (ml/kg/min), or null.
     vo2max: Double? = null,
+    // Fork (Rick): the 14-night sleep-debt ledger for the Sleep debt tile, or null.
+    sleepDebt: com.noop.analytics.SleepDebtLedger? = null,
     enabledMetrics: List<KeyMetric> = KeyMetric.defaultOrder,
     isToday: Boolean = false,
     // #1164: today's Rest is provisional while the strap has banked records not yet offloaded — the Rest
@@ -6170,6 +6180,22 @@ private fun MetricGrid(
             // Bar spans 20 to 60 ml/kg/min, roughly poor to excellent for adults.
             frac = vo2max?.let { ((it - 20.0) / 40.0).coerceIn(0.0, 1.0) },
         ),
+        // Fork (Rick): sleep debt over the last 14 nights, the same figure as the Sleep tab's debt card.
+        KeyMetric.SLEEP_DEBT to run {
+            val onTarget = sleepDebt != null && (sleepDebt.magnitudeMin < com.noop.analytics.SleepDebt.ON_TARGET_BAND_MIN || !sleepDebt.isDebt)
+            KeyTileData(
+                label = "Sleep debt",
+                value = when {
+                    sleepDebt == null -> NO_DATA
+                    onTarget -> "None"
+                    else -> durationText(sleepDebt.magnitudeMin)
+                },
+                unit = "",
+                tint = sleepDebt?.let { debtBalanceColor(it) } ?: Palette.textPrimary,
+                // Bar fills toward 6 hours of debt.
+                frac = sleepDebt?.let { if (onTarget) 0.0 else (it.magnitudeMin / 360.0).coerceIn(0.0, 1.0) },
+            )
+        },
         KeyMetric.SKIN_TEMP to run {
             // Added 2026-08-24 (queue 11c follow-up): first Key Metrics appearance for Skin Temp — was
             // already a "Your Cards" tile (DashboardCard.SKIN_TEMP), never a Key Metrics one. Same
@@ -6218,6 +6244,7 @@ private fun MetricGrid(
         // already does, not a new/unverified route.
         KeyMetric.SKIN_TEMP -> ({ onOpenMetric("skin") })
         KeyMetric.VO2MAX -> ({ onOpenMetric("vo2max_est") }) // Fork (Rick): same detail as the VO2 Max card
+        KeyMetric.SLEEP_DEBT -> ({ onOpenMetric(HERO_REST_METRIC_KEY) }) // Fork (Rick): opens the Sleep tab
     }
     // S5: slice from the FRONT of the saved order so a pinned/selected tile is never dropped or reordered
     // (#251); only the tail folds behind the expander. Mirrors the iOS visibleKeyMetrics prefix(cap).
@@ -6317,6 +6344,7 @@ private fun keyMetricIcon(metric: KeyMetric): ImageVector = when (metric) {
     // Same glyph the sibling "Your Cards" tile (DashboardCard.SKIN_TEMP) already uses.
     KeyMetric.SKIN_TEMP -> Icons.Filled.Thermostat
     KeyMetric.VO2MAX -> Icons.Filled.Air // Fork (Rick)
+    KeyMetric.SLEEP_DEBT -> Icons.Filled.Bedtime // Fork (Rick)
 }
 
 /**
